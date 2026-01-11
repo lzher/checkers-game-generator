@@ -730,7 +730,7 @@
                 if (!this.indexToAxial.has(currKey)) return [];
 
                 const [currQ, currR] = this.indexToAxial.get(currKey);
-                const colors = ['#FF0000', '#00FF00', '#0000FF', '#FFFF00', '#FF00FF'];
+                const colors = [COLORS.BLUE, COLORS.RED, COLORS.YELLOW, COLORS.PURPLE, COLORS.ORANGE];
 
                 for (const [dirQ, dirR] of AXIAL_DIRS) {
                     // 优化：只尝试常用跳跃距离，避免过于奇怪的超长跳跃导致难以解题
