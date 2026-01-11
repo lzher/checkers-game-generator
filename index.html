@@ -493,6 +493,14 @@
                     this.playerPos = [...endPos];
 
                     if (this.growPathElegant(0, targetSteps, startTime, endPos)) {
+
+                        // === 双重保险：最终全局验证 ===
+                        // 确保生成的最终局面，其最短解确实等于目标步数
+                        const finalSolveSteps = this.fastSolver(this.playerPos);
+                        if (finalSolveSteps < targetSteps) {
+                            console.warn(`检测到微小捷径 (目标${targetSteps}, 实际${finalSolveSteps})，丢弃重试...`);
+                            continue; // 重新开始 while 循环
+                        }
                         
                         // === 校验逻辑 ===
                         if (forceBottom) {
@@ -603,7 +611,8 @@
                     // 为了性能，不必每一步都查 BFS。但也不敢隔太久。
                     // 策略：前 10 步每 2 步查一次；10 步以后每 1 步都要查！
                     // 因为捷径往往是在后期（棋盘拥挤时）产生的。
-                    const checkFrequency = currentDepth > 10 ? 1 : 2;
+                    // const checkFrequency = currentDepth > 10 ? 1 : 2;
+                    const checkFrequency = 1;
                     
                     if (currentDepth > 2 && currentDepth % checkFrequency === 0) {
                         const solveSteps = this.fastSolver(this.playerPos);
