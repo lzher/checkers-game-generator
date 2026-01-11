@@ -256,7 +256,7 @@
                 <div class="level-controls" style="width: 100%; display: flex; justify-content: center; gap: 10px; margin-bottom: 10px; flex-wrap: wrap;">
                     <select id="difficultySelect" style="padding: 12px; border-radius: 8px; border: 1px solid #ccc; font-size: 1rem;">
                         <option value="low">低难度</option>
-                        <option value="medium" selected>中等难度</option>
+                        <option value="medium" selected>中难度</option>
                         <option value="high">高难度</option>
                     </select>
                     <button id="generateBtn" style="background-color: #9b59b6; color: white;">生成关卡</button>
@@ -456,15 +456,15 @@
             generateLevel(difficulty) {
                 // 难度设置
                 let minSteps = 5;
-                let targetBranching = 1.5; 
+                let targetBranching = 1.2; // 低难度分支少
                 
                 if (difficulty === 'medium') { 
-                    minSteps = 10; // 降低步数要求
-                    targetBranching = 2.0; 
+                    minSteps = 10; 
+                    targetBranching = 1.5; // 中难度分支适中
                 }
                 if (difficulty === 'high') { 
-                    minSteps = 20; // 降低步数要求
-                    targetBranching = 2.5; 
+                    minSteps = 12; // 步数不必太高，重点是分支
+                    targetBranching = 2.2; // 高难度分支多
                 }
                 
                 // 1. 清空棋盘
@@ -672,7 +672,9 @@
                 // 用户指示：“能加就加，不能加就算了”
                 // 不再强求达到 targetBranching，而是遍历一遍候选集，能放的都放上去
                 let addedCount = 0;
-                const maxDecoys = 20; // 限制最大添加数量，防止棋盘太乱
+                // 限制最大添加数量，防止棋盘太乱
+                // 高难度多加点，低难度少加点
+                const maxDecoys = (targetBranching > 2.0) ? 25 : 10; 
                 
                 for (const [r, c] of candidates) {
                     if (addedCount >= maxDecoys) break;
@@ -694,6 +696,12 @@
                     
                     // 只要分支系数不降低太多，或者有提升，就保留
                     // 放宽标准：只要是合法干扰项，就倾向于保留
+                    // 低难度严格限制分支系数，不要太高
+                    if (targetBranching < 1.5 && newBranching > 1.8) {
+                        this.board[r][c] = EMPTY; // 太难了，撤销
+                        continue;
+                    }
+
                     if (newBranching >= currentBranching - 0.1) {
                         this.assignRandomColor(r, c);
                         currentBranching = newBranching;
@@ -875,7 +883,7 @@
                 
                 // 5. 尝试跳跃
                 // 保持较低的分支搜索上限，保证生成速度
-                const maxBranch = difficulty === 'medium' ? 5 : 8;
+                const maxBranch = difficulty === 'medium' ? 5 : 5;
                 
                 // 只尝试前N个最好的候选项
                 // 稍微随机化一下顺序，避免每次都走完全一样的路径
