@@ -528,29 +528,65 @@
                     
                     const targetPos = [endR, endC];
 
-                    // 3. 递归回溯生成主干路径
-                    const reservedCells = new Set();
+                    // 3. 新的生成策略：骨架 + 复杂化
                     
-                    // 传入 targetPos 但仅作参考
-                    // 生成时稍微多要求一点步数
-                    if (this.generatePathRecursively(0, minSteps + 2, reservedCells, difficulty, targetPos, startTime)) {
-                        // 关键验证：检查生成的骨架是否存在捷径
-                        const actualPath = this.solveGameBFS(this.board, this.playerPos);
-                        const actualSteps = actualPath ? actualPath.length - 1 : 0;
+                    // A. 生成骨架 (简单的直线路径)
+                    const skeletonPath = this.generateSkeleton(this.playerPos, targetPos);
+                    
+                    if (skeletonPath) {
+                        // B. 复杂化路径 (插入折返和绕路)
+                        const complexPath = this.complexifyPath(skeletonPath, minSteps, startTime);
                         
-                        if (actualPath && actualSteps >= minSteps) {
-                            success = true;
-                            break;
-                        }
-                        
-                        // 记录最佳结果
-                        if (actualPath && actualSteps > maxFoundSteps) {
-                            maxFoundSteps = actualSteps;
-                            bestLevel = {
-                                board: this.board.map(row => [...row]),
-                                boardColors: this.boardColors.map(row => [...row]),
-                                playerPos: [...this.playerPos]
-                            };
+                        // C. 构建最终盘面
+                        if (complexPath.length - 1 >= minSteps) {
+                            // 重建棋盘
+                            this.board = this.createEmptyBoard();
+                            this.boardColors = this.createEmptyColorLayer();
+                            
+                            // 根据路径放置障碍物
+                            // complexPath 是反向路径：End -> ... -> Start
+                            // 每一个步骤 P[i] -> P[i+1] 意味着在反向跳跃，中间产生一个障碍物
+                            // 最终 Start 位置是 P[last]，也就是实际游戏的起点
+                            
+                            // 我们需要把 Player 放在 Start (complexPath 最后一个点)
+                            // 并把路径上产生的所有障碍物放到棋盘上
+                            
+                            const startNode = complexPath[complexPath.length - 1];
+                            this.board[startNode[0]][startNode[1]] = PLAYER;
+                            this.playerPos = [...startNode];
+                            
+                            // 放置障碍物
+                            for (let k = 0; k < complexPath.length - 1; k++) {
+                                const p1 = complexPath[k];
+                                const p2 = complexPath[k+1];
+                                const jumpInfo = this.analyzeJump(p1[0], p1[1], p2[0], p2[1]);
+                                if (jumpInfo) {
+                                    const [mr, mc] = jumpInfo.mid;
+                                    this.board[mr][mc] = OBSTACLE;
+                                    this.assignRandomColor(mr, mc);
+                                }
+                            }
+                            
+                            this.createAxialMapping();
+                            
+                            // 验证
+                            const actualPath = this.solveGameBFS(this.board, this.playerPos);
+                            const actualSteps = actualPath ? actualPath.length - 1 : 0;
+                            
+                            if (actualPath && actualSteps >= minSteps) {
+                                success = true;
+                                break;
+                            }
+                            
+                             // 记录最佳结果
+                            if (actualPath && actualSteps > maxFoundSteps) {
+                                maxFoundSteps = actualSteps;
+                                bestLevel = {
+                                    board: this.board.map(row => [...row]),
+                                    boardColors: this.boardColors.map(row => [...row]),
+                                    playerPos: [...this.playerPos]
+                                };
+                            }
                         }
                     }
                 }
@@ -838,6 +874,162 @@
                 }
                 
                 return steps > 0 ? totalBranches / steps : 0;
+            }
+
+            // 生成骨架：寻找从Start(Top)到End(Bottom)的最短反向路径
+            // 注意：因为是反向生成，输入参数 startPos 是 Top (Game End), targetPos 是 Bottom (Game Start)
+            // 我们需要找一条从 Top 到 Bottom 的路径
+            generateSkeleton(startPos, targetPos) {
+                // 使用 BFS 寻找最短路径
+                // 此时棋盘被认为是空的，我们可以随意跳跃，只要不越界
+                // 但要避开 startPos (因为那是起点)
+                
+                const queue = [[startPos]];
+                const visited = new Set();
+                visited.add(`${startPos[0]},${startPos[1]}`);
+                
+                // 限制搜索深度
+                let iterations = 0;
+                while (queue.length > 0) {
+                    if (iterations++ > 5000) return null;
+                    
+                    const path = queue.shift();
+                    const current = path[path.length - 1];
+                    
+                    // 到达目标
+                    if (current[0] === targetPos[0] && current[1] === targetPos[1]) {
+                        return path;
+                    }
+                    
+                    // 获取所有可能的几何反向跳跃（不考虑障碍物，因为是空的）
+                    // 在空棋盘上，反向跳跃 = 正向跳跃的逆操作
+                    // 即：从 Current 跳到 Next，中间隔着 Mid
+                    // 只要 Next 在界内即可
+                    
+                    for (const [dq, dr] of AXIAL_DIRS) {
+                        for (const factor of [2, 4]) { // 骨架只用短跳，方便后续扩展
+                            const startKey = `${current[0]},${current[1]}`;
+                            if (!this.indexToAxial.has(startKey)) continue;
+                            
+                            const [q1, r1] = this.indexToAxial.get(startKey);
+                            const nextQ = q1 + dq * factor;
+                            const nextR = r1 + dr * factor;
+                            const nextKey = `${nextQ},${nextR}`;
+                            
+                            if (this.axialToIndex.has(nextKey)) {
+                                const [nr, nc] = this.axialToIndex.get(nextKey);
+                                const nKey = `${nr},${nc}`;
+                                
+                                if (!visited.has(nKey)) {
+                                    visited.add(nKey);
+                                    queue.push([...path, [nr, nc]]);
+                                }
+                            }
+                        }
+                    }
+                }
+                return null;
+            }
+            
+            // 复杂化路径
+            complexifyPath(initialPath, minSteps, startTime) {
+                let path = [...initialPath];
+                let noImprovementCount = 0;
+                
+                // 所有的点（包括路径点和障碍物点）都不能重叠
+                // 我们需要一个函数来计算当前路径占用的所有点
+                
+                while (path.length - 1 < minSteps && Date.now() - startTime < 8000) {
+                    if (noImprovementCount > 20) break;
+                    
+                    // 随机选择一个线段 P[i] -> P[i+1]
+                    // 尝试将其替换为 P[i] -> M -> P[i+1] (增加1步)
+                    // 或者 P[i] -> M1 -> M2 -> P[i+1] (增加2步)
+                    
+                    const idx = Math.floor(Math.random() * (path.length - 1));
+                    const p1 = path[idx];
+                    const p2 = path[idx+1];
+                    
+                    // 计算当前路径占用的所有点 (Forbidden Set)
+                    const forbidden = new Set();
+                    for (let k = 0; k < path.length - 1; k++) {
+                        const a = path[k];
+                        const b = path[k+1];
+                        forbidden.add(`${a[0]},${a[1]}`);
+                        forbidden.add(`${b[0]},${b[1]}`);
+                        
+                        // 中间点
+                        const jumpInfo = this.analyzeJump(a[0], a[1], b[0], b[1]);
+                        if (jumpInfo) {
+                            forbidden.add(`${jumpInfo.mid[0]},${jumpInfo.mid[1]}`);
+                            jumpInfo.pathCells.forEach(pc => forbidden.add(`${pc[0]},${pc[1]}`));
+                        }
+                    }
+                    // 起点和终点 (对于这一段来说) 是允许重用的，因为我们是连接它们
+                    // 但 p1 和 p2 本身在 forbidden 里，这没关系，因为我们要找的是中间点 M
+                    
+                    // 尝试寻找一个 M，使得 p1 -> M -> p2 成立
+                    // 条件：
+                    // 1. p1 -> M 合法
+                    // 2. M -> p2 合法
+                    // 3. M 不在 forbidden 中
+                    // 4. Mid(p1, M) 不在 forbidden 中
+                    // 5. Mid(M, p2) 不在 forbidden 中
+                    // 注意：Mid(p1, p2) (原障碍物) 是可以被占用的！因为我们把这一段删掉了。
+                    // 所以 forbidden 应该先排除当前这一段的中间点。
+                    
+                    // 修正 Forbidden：移除当前段的占用
+                    const currentJumpInfo = this.analyzeJump(p1[0], p1[1], p2[0], p2[1]);
+                    if (currentJumpInfo) {
+                        forbidden.delete(`${currentJumpInfo.mid[0]},${currentJumpInfo.mid[1]}`);
+                        currentJumpInfo.pathCells.forEach(pc => forbidden.delete(`${pc[0]},${pc[1]}`));
+                    }
+                    
+                    let bestDetour = null;
+                    
+                    // 搜索所有可能的 M
+                    for (const [dq, dr] of AXIAL_DIRS) {
+                        for (const factor of [2, 4, 6]) {
+                            const startKey = `${p1[0]},${p1[1]}`;
+                            const [q1, r1] = this.indexToAxial.get(startKey);
+                            const mq = q1 + dq * factor;
+                            const mr = r1 + dr * factor;
+                            const mKey = `${mq},${mr}`;
+                            
+                            if (!this.axialToIndex.has(mKey)) continue;
+                            const [mx, my] = this.axialToIndex.get(mKey);
+                            const mStr = `${mx},${my}`;
+                            
+                            if (forbidden.has(mStr)) continue;
+                            
+                            // 检查 p1 -> M
+                            const jump1 = this.analyzeJump(p1[0], p1[1], mx, my);
+                            if (!jump1) continue;
+                            if (forbidden.has(`${jump1.mid[0]},${jump1.mid[1]}`)) continue;
+                             
+                            // 检查 M -> p2
+                            const jump2 = this.analyzeJump(mx, my, p2[0], p2[1]);
+                            if (!jump2) continue;
+                            if (forbidden.has(`${jump2.mid[0]},${jump2.mid[1]}`)) continue;
+                            
+                            // 找到合法的 M
+                            bestDetour = [mx, my];
+                            break;
+                        }
+                        if (bestDetour) break;
+                    }
+                    
+                    if (bestDetour) {
+                        // 插入 M
+                        // path: [..., p1, p2, ...] -> [..., p1, M, p2, ...]
+                        path.splice(idx + 1, 0, bestDetour);
+                        noImprovementCount = 0;
+                    } else {
+                        noImprovementCount++;
+                    }
+                }
+                
+                return path;
             }
 
             // 递归生成路径（回溯法）
