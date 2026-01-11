@@ -472,36 +472,67 @@
                 this.boardColors = this.createEmptyColorLayer();
                 this.createAxialMapping(); 
 
-                // 2. 随机选择起点（顶部）
-                // 尝试多次以找到合适的起点
+                // 2. 随机选择起点（顶部）和 终点（底部）
+                // 恢复为原来的逻辑：只确定起点，终点不固定（只要到达底部区域即可）
+                // 这样可以大大提高生成成功率
+                
+                const startTime = Date.now();
+                const TIME_LIMIT = 10000; // 10秒超时
+                
                 let success = false;
                 let bestLevel = null;
                 let maxFoundSteps = 0;
                 
-                // 增加尝试次数，因为现在有严格的验证
+                // 确定起点 (游戏结束位置，生成器的Start)
+                let startCandidates = [];
+                for (let r = 0; r < 4; r++) {
+                    for (let c = 0; c < BOARD_COLS; c++) {
+                        if (this.board[r][c] !== INVALID) {
+                            startCandidates.push([r, c]);
+                        }
+                    }
+                }
+                
+                // 目标终点区域 (仅用于启发式引导，不强制)
+                let endCandidates = [];
+                for (let r = 13; r < BOARD_ROWS; r++) {
+                    for (let c = 0; c < BOARD_COLS; c++) {
+                        if (this.board[r][c] !== INVALID) {
+                            endCandidates.push([r, c]);
+                        }
+                    }
+                }
+
+                // 尝试多次生成
                 for(let i=0; i<50; i++) {
+                    // 超时检查
+                    if (Date.now() - startTime > TIME_LIMIT) {
+                        console.warn("Generation timed out!");
+                        break;
+                    }
+
                     // 重置棋盘
                     this.board = this.createEmptyBoard();
                     this.boardColors = this.createEmptyColorLayer();
                     
-                    let goalCandidates = [];
-                    for (let r = 0; r < 4; r++) {
-                        for (let c = 0; c < BOARD_COLS; c++) {
-                            if (this.board[r][c] !== INVALID) {
-                                goalCandidates.push([r, c]);
-                            }
-                        }
-                    }
-                    const [startR, startC] = goalCandidates[Math.floor(Math.random() * goalCandidates.length)];
+                    // 随机选择起点
+                    const [startR, startC] = startCandidates[Math.floor(Math.random() * startCandidates.length)];
                     
+                    // 随机选择一个引导目标（仅作为磁铁，不强制到达）
+                    const [endR, endC] = endCandidates[Math.floor(Math.random() * endCandidates.length)];
+                    
+                    // 设置生成器起点 (Game End)
                     this.board[startR][startC] = PLAYER;
                     this.playerPos = [startR, startC];
                     
+                    const targetPos = [endR, endC];
+
                     // 3. 递归回溯生成主干路径
                     const reservedCells = new Set();
-                    // 生成时稍微多要求一点步数，以防被优化
-                    // 传入 difficulty 参数以调整生成策略
-                    if (this.generatePathRecursively(0, minSteps + 2, reservedCells, difficulty)) {
+                    
+                    // 传入 targetPos 但仅作参考
+                    // 生成时稍微多要求一点步数
+                    if (this.generatePathRecursively(0, minSteps + 2, reservedCells, difficulty, targetPos, startTime)) {
                         // 关键验证：检查生成的骨架是否存在捷径
                         const actualPath = this.solveGameBFS(this.board, this.playerPos);
                         const actualSteps = actualPath ? actualPath.length - 1 : 0;
@@ -511,7 +542,7 @@
                             break;
                         }
                         
-                        // 记录最佳结果作为备选
+                        // 记录最佳结果
                         if (actualPath && actualSteps > maxFoundSteps) {
                             maxFoundSteps = actualSteps;
                             bestLevel = {
@@ -809,8 +840,12 @@
             }
 
             // 递归生成路径（回溯法）
-            generatePathRecursively(currentSteps, minSteps, reservedCells, difficulty) {
+            generatePathRecursively(currentSteps, minSteps, reservedCells, difficulty, targetPos, startTime) {
+                // 超时检查
+                if (Date.now() - startTime > 10000) return false;
+
                 // 1. 终止条件：在底部 且 步数达标
+                // 不强制精确到达 targetPos，只要到达底部区域即可
                 const inBottomTriangle = this.playerPos[0] >= 13;
                 if (inBottomTriangle && currentSteps >= minSteps) {
                     return true;
@@ -820,14 +855,11 @@
                 if (currentSteps > minSteps + 15) return false;
                 
                 // 3. 获取所有可能的反向跳跃
-                // 传入 difficulty，允许在高难度下放宽检查，增加可能的跳跃
                 const possibleJumps = this.getAllReverseJumps(this.playerPos[0], this.playerPos[1], reservedCells);
                 
-                // 如果没有跳跃点，且还没到达底部，尝试稍微回退？
-                // 这里不做复杂处理，直接返回false触发回溯
                 if (possibleJumps.length === 0) return false;
                 
-                // 4. 启发式排序 - 核心优化：横向扫描 + 盘旋
+                // 4. 启发式排序
                 const progress = currentSteps / minSteps;
                 
                 possibleJumps.sort((a, b) => {
@@ -876,20 +908,25 @@
                         
                     } else {
                         // 【后期策略】：冲刺
+                        // 目标引导：优先选择距离目标点更近的跳跃
+                        if (targetPos) {
+                            // 计算当前位置到目标的距离（简单行距 + 列距）
+                            // 注意：这里需要计算 jumpTo 位置到 targetPos 的距离
+                            const distA = Math.abs(rA - targetPos[0]) + Math.abs(cA - targetPos[1]);
+                            const distB = Math.abs(rB - targetPos[0]) + Math.abs(cB - targetPos[1]);
+                            return distA - distB; // 距离越小越好
+                        }
+                        
                         if (inBottomA !== inBottomB) return inBottomA ? -1 : 1;
                         return rB - rA; // 越靠下越好
                     }
                 });
                 
                 // 5. 尝试跳跃
-                // 保持较低的分支搜索上限，保证生成速度
                 const maxBranch = difficulty === 'medium' ? 5 : 5;
-                
-                // 只尝试前N个最好的候选项
-                // 稍微随机化一下顺序，避免每次都走完全一样的路径
                 const topMoves = possibleJumps.slice(0, maxBranch);
+                
                 if (Math.random() > 0.3 && topMoves.length > 1) {
-                    // 简单的随机交换，增加变化
                     const idx1 = Math.floor(Math.random() * topMoves.length);
                     const idx2 = Math.floor(Math.random() * topMoves.length);
                     [topMoves[idx1], topMoves[idx2]] = [topMoves[idx2], topMoves[idx1]];
@@ -1569,17 +1606,15 @@
                         for (const [tr, tc] of possibleJumps) {
                             const [hx, hy] = this.getPixelPos(tr, tc);
                             
+                            // 修改：使用空心圆环代替实心圆，避免像棋子
                             this.ctx.beginPath();
-                            this.ctx.fillStyle = COLORS.HIGHLIGHT;
-                            this.ctx.arc(hx, hy, 12, 0, Math.PI * 2);
-                            this.ctx.fill();
-                            
-                            // 添加边框
-                            this.ctx.beginPath();
+                            // 外圈
+                            this.ctx.arc(hx, hy, 8, 0, Math.PI * 2);
                             this.ctx.strokeStyle = '#00A844';
-                            this.ctx.lineWidth = 2;
-                            this.ctx.arc(hx, hy, 12, 0, Math.PI * 2);
+                            this.ctx.lineWidth = 3;
                             this.ctx.stroke();
+                            
+                            // 去掉中心小点，确保看起来完全不像棋子
                         }
                     }
                 }
