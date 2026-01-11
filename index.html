@@ -1703,6 +1703,14 @@
                         this.draw();
                     }
                 });
+
+                // 鼠标离开画布，清除箭头
+                this.canvas.addEventListener('mouseleave', () => {
+                    if (this.hoveredTarget) {
+                        this.hoveredTarget = null;
+                        this.draw();
+                    }
+                });
                 
                 // 联动逻辑：下拉框改变 -> 更新输入框
                 const presetSelect = document.getElementById('difficultyPreset');
@@ -1735,16 +1743,19 @@
                 
                 // 按钮事件
                 document.getElementById('undoBtn').addEventListener('click', () => {
+                    this.hoveredTarget = null;
                     this.undo();
                     this.draw();
                 });
                 
                 document.getElementById('restartBtn').addEventListener('click', () => {
+                    this.hoveredTarget = null;
                     this.restart();
                 });
                 
                 // 生成按钮逻辑：直接读取 stepInput 的值
                 document.getElementById('generateBtn').addEventListener('click', () => {
+                    this.hoveredTarget = null;
                     // 获取输入框的值
                     let steps = parseInt(stepInput.value);
                     if (isNaN(steps) || steps < 1) steps = 5; // 默认保底
@@ -1754,6 +1765,7 @@
                 });
                 
                 document.getElementById('copyBtn').addEventListener('click', () => {
+                    this.hoveredTarget = null;
                     const code = this.exportLevel();
                     navigator.clipboard.writeText(code).then(() => {
                         alert('关卡代码已复制到剪贴板！');
@@ -1764,6 +1776,7 @@
                 });
                 
                 document.getElementById('loadBtn').addEventListener('click', () => {
+                    this.hoveredTarget = null;
                     const code = prompt('请输入关卡代码:');
                     if (code) {
                         if (this.importLevel(code)) {
@@ -1775,6 +1788,7 @@
                 });
                 
                 document.getElementById('hintBtn').addEventListener('click', () => {
+                    this.hoveredTarget = null;
                     const path = this.solveGameBFS(this.board, this.playerPos);
                     if (path) {
                         this.hintPath = path;
