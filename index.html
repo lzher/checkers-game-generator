@@ -359,9 +359,6 @@
                 this.selected = null;
                 this.hintPath = null;
                 
-                // 保存初始状态
-                this.saveState();
-                
                 // 更新UI显示
                 this.updateUI();
             }
@@ -454,14 +451,13 @@
                 this.createAxialMapping();
             }
 
-
             // ==========================================
-            // 4.0 完美版：底部三角起跑 + 优雅生长
+            // 5.0 修正版：顶部终点 -> 底部起点
             // ==========================================
             generateLevel(difficulty) {
                 const config = {
-                    medium: { steps: 15, timeout: 5000 },
-                    high:   { steps: 25, timeout: 10000 }
+                    medium: { steps: 10, timeout: 5000 },
+                    high:   { steps: 15, timeout: 10000 }
                 };
                 const { steps: targetSteps, timeout } = config[difficulty] || { steps: 5, timeout: 3000 };
                 
@@ -469,29 +465,27 @@
                 let success = false;
 
                 while (Date.now() - startTime < timeout) {
-                    // A. 初始化
                     this.board = this.createEmptyBoard();
                     this.boardColors = this.createEmptyColorLayer();
                     this.createAxialMapping();
 
-                    // B. 【核心修改】强制锁定底部三角区域作为起点(游戏的终点)
-                    const endPos = this.getStrictBottomTrianglePos();
+                    // 1. 【反向起点】设定在顶部 4 行 (Game End State)
+                    // 玩家最终要跳到这里，所以反向生成的"第一颗子"要放在这里
+                    const endPos = this.getRandomTopTrianglePos(); 
                     if (!endPos) continue;
 
                     this.board[endPos[0]][endPos[1]] = PLAYER;
                     this.playerPos = [...endPos];
 
-                    // C. 拓扑生长
+                    // 2. 向下生长 (Top -> Bottom)
                     if (this.growPathElegant(0, targetSteps, startTime, endPos)) {
                         success = true;
                         
-                        // 【关键】保存生成的关卡数据，供 Restart 使用
                         this.currentLevel = {
                             obstacles: [],
-                            player: [...this.playerPos]
+                            player: [...this.playerPos] // 最后的 playerPos 即为游戏起点的 playerPos (底部)
                         };
                         
-                        // 遍历棋盘保存所有障碍物
                         for(let r=0; r<BOARD_ROWS; r++){
                             for(let c=0; c<BOARD_COLS; c++){
                                 if(this.board[r][c] === OBSTACLE) {
@@ -500,9 +494,17 @@
                             }
                         }
 
-                        console.log(`✨ 关卡生成完毕! 步数: ${targetSteps}`);
-                        this.restart(); // 直接调用 restart 来刷新界面和状态
-                        return;
+                        // 3. 【最后校验】确保最终生成的起点真的在底部4行
+                        // 虽然算法有引导，但为了保险起见，如果"长"到了中间就停了，那不算成功
+                        const [finalR, finalC] = this.playerPos;
+                        if (finalR >= BOARD_ROWS - 4) {
+                            console.log(`✨ 关卡生成完毕! 起点:(${finalR},${finalC}), 步数:${targetSteps}`);
+                            this.restart(); 
+                            return;
+                        } else {
+                            // 没到底部，但这局步数够了？这种通常是废局，继续找
+                            success = false;
+                        }
                     }
                 }
                 
@@ -510,84 +512,64 @@
                 this.draw();
             }
 
-            // 获取底部 4 行的有效位置
-            getStrictBottomTrianglePos() {
+            // 获取顶部 4 行的随机位置
+            getRandomTopTrianglePos() {
                 const candidates = [];
-                // 只扫描最后 4 行 (例如 10, 11, 12, 13)
-                const startRow = Math.max(0, BOARD_ROWS - 4); 
-                
-                for (let r = startRow; r < BOARD_ROWS; r++) {
+                // 扫描前 4 行 (0, 1, 2, 3)
+                for (let r = 0; r < 4; r++) {
                     for (let c = 0; c < BOARD_COLS; c++) {
                         if (this.board[r][c] !== INVALID) {
                             candidates.push([r, c]);
                         }
                     }
                 }
-                
                 if (candidates.length === 0) return null;
                 return candidates[Math.floor(Math.random() * candidates.length)];
             }
 
-            // 【优雅点2】基于评分的递归生长
-            // 优化版：支持生成更高步数 (20+步)
-            growPathElegant(currentDepth, targetDepth, startTime, originalEndPos) {
+            growPathElegant(currentDepth, targetDepth, startTime, originalTopPos) {
                 if (currentDepth >= targetDepth) return true;
-                if (Date.now() - startTime > 15000) return false; // 稍微放宽超时到15秒
+                if (Date.now() - startTime > 15000) return false;
 
                 let moves = this.getAllValidReverseMoves();
 
                 moves.forEach(move => {
-                    const [pr, pc] = move.prevPos;
+                    const [pr, pc] = move.prevPos; // 新的玩家位置(反向跳跃落点)
                     
-                    // 1. 距离分：离终点越远越好
-                    const dist = Math.sqrt(Math.pow(pr - originalEndPos[0], 2) + Math.pow(pc - originalEndPos[1], 2));
-                    
-                    // 2. 垂直分：往上走 (Row 越小越好)
-                    const verticalScore = (BOARD_ROWS - pr); 
+                    // 1. 垂直引导：必须鼓励"往下跳" (Row 变大)
+                    // pr 是行号。行号越大，越靠近底部。
+                    // 权重给得很高 (x 3.0)，强迫路径向底部延伸
+                    const verticalScore = pr; 
 
-                                        // 3. 【新增】空旷度分：目标点周围越空越好
-                    // 修正：直接使用内置逻辑判断周围障碍物数量，不再调用 getNeighbors
+                    // 2. 距离分：离顶部的原始点越远越好
+                    const dist = Math.sqrt(
+                        Math.pow(pr - originalTopPos[0], 2) + 
+                        Math.pow(pc - originalTopPos[1], 2)
+                    );
+
+                    // 3. 空旷度 (防止堵死)
                     let obstacleCount = 0;
-                    
-                    // 获取当前位置的 Axial 坐标
                     const posKey = `${pr},${pc}`;
                     if (this.indexToAxial.has(posKey)) {
                         const [q, r] = this.indexToAxial.get(posKey);
-                        
-                        // 遍历 6 个相邻方向
                         for (const [dq, dr] of AXIAL_DIRS) {
-                            const neighborQ = q + dq;
-                            const neighborR = r + dr;
-                            const neighborKey = `${neighborQ},${neighborR}`;
-                            
-                            // 如果邻居在棋盘内
-                            if (this.axialToIndex.has(neighborKey)) {
-                                const [nr, nc] = this.axialToIndex.get(neighborKey);
-                                // 检查是否是障碍物 (OBSTACLE) 或 边界 (INVALID)
-                                // 注意：我们反向生成时，OBSTACLE 是刚刚复活的棋子。
-                                // 周围棋子越少，说明越空旷。
-                                if (this.board[nr][nc] === OBSTACLE) {
-                                    obstacleCount++;
-                                }
+                            const nKey = `${q+dq},${r+dr}`;
+                            if (this.axialToIndex.has(nKey)) {
+                                const [nr, nc] = this.axialToIndex.get(nKey);
+                                if (this.board[nr][nc] === OBSTACLE) obstacleCount++;
                             }
                         }
                     }
-                    
-                    // 空旷度评分：周围障碍物越少，分数越高 (奖励空旷)
-                    // 比如：周围0个障碍物 -> +3分；周围3个障碍物 -> 0分
-                    const isolationScore = (3 - obstacleCount); 
+                    const isolationScore = (3 - obstacleCount);
 
-                    // 4. 随机扰动 (重要！避免陷入局部最优)
-                    const noise = Math.random() * 8; 
+                    const noise = Math.random() * 8;
 
-                    // 调整权重：距离权重降低，垂直权重增加 (强制往上)，增加随机性
-                    move.score = (dist * 1.5) + (verticalScore * 2.0) + isolationScore + noise;
+                    // 综合评分：垂直分(往下) + 距离分(拉长) + 空旷分
+                    move.score = (verticalScore * 3.0) + (dist * 1.5) + isolationScore + noise;
                 });
 
-                // 排序
                 moves.sort((a, b) => b.score - a.score);
 
-                // 增加候选数量：高步数需要更多尝试
                 const candidateLimit = Math.min(moves.length, 8); 
                 
                 for (let i = 0; i < candidateLimit; i++) {
@@ -595,20 +577,17 @@
                     
                     this.executeReverseMove(move, PLAYER);
                     
-                    // 验证逻辑优化：每 3 步验证一次，且允许 2 步的误差
-                    // 这样可以允许生成一些"非绝对唯一解"但非常复杂的迷宫
+                    // 验证逻辑
                     let isValid = true;
                     if (currentDepth > 4 && currentDepth % 2 === 0) { 
                         const solveSteps = this.fastSolver(this.playerPos);
-                        // 允许实际解法比当前生成深度少 2 步 (容错)
-                        // 这能极大提高生成高难度关卡的成功率，因为完美唯一解在高步数下很难
                         if (solveSteps < currentDepth - 1) { 
                             isValid = false;
                         }
                     }
 
                     if (isValid) {
-                        if (this.growPathElegant(currentDepth + 1, targetDepth, startTime, originalEndPos)) {
+                        if (this.growPathElegant(currentDepth + 1, targetDepth, startTime, originalTopPos)) {
                             return true;
                         }
                     }
@@ -1079,9 +1058,6 @@
                 
                 const [or_, oc] = obstaclePos;
                 
-                // 保存当前状态
-                this.saveState();
-                
                 // 起点清空
                 this.board[fr][fc] = EMPTY;
                 
@@ -1147,13 +1123,13 @@
                 this.history.push(state);
             }
             
-            // 改进版：更安全的撤销
             undo() {
-                if (this.history.length > 0) { // 只要有历史就能撤销
-                    // 取出最近的一个状态
+                // 只要栈里有东西，那个东西就是"上一步之前的样子"
+                if (this.history.length > 0) {
+                    // 1. 弹出最近的一次存档
                     const prevState = this.history.pop();
                     
-                    // 恢复状态
+                    // 2. 直接恢复这个存档
                     this.board = prevState.board.map(row => [...row]);
                     this.boardColors = prevState.boardColors.map(row => [...row]);
                     this.playerPos = prevState.playerPos ? [...prevState.playerPos] : null;
@@ -1162,18 +1138,15 @@
                     this.selected = null;
                     this.hintPath = null;
                     
-                    // 重建辅助数据
+                    // 3. 重建映射与UI
                     this.createAxialMapping();
-                    
-                    // UI 重置
                     document.getElementById('victoryMessage').style.display = 'none';
                     this.gameWon = false;
                     
                     this.updateUI();
-                    this.draw(); // 必须重绘
+                    this.draw();
                 } else {
-                    // 可以在这里加一个提示: "已经回到起点了"
-                    console.log("没有更多步骤可撤销");
+                    console.log("已经回到起点，无法撤销");
                 }
             }
 
@@ -1206,9 +1179,6 @@
                 this.gameWon = false;
                 this.selected = null;
                 this.hintPath = null;
-                
-                // 保存初始状态
-                this.saveState();
                 
                 // 隐藏胜利消息 (DOM元素)
                 const victoryMsg = document.getElementById('victoryMessage');
