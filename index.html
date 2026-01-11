@@ -548,54 +548,40 @@
                 return candidates[Math.floor(Math.random() * candidates.length)];
             }
             
-            // 15.0 最终性能版：支持高步数 + 鼓励顶部密集 + 性能平衡
+            // 17.0 空间均衡版：打散局部子结构
             growPathElegant(currentDepth, targetDepth, startTime, originalTopPos) {
                 // 1. 成功出口
                 if (currentDepth >= targetDepth) return true;
                 
-                // 2. 超时检查 (30步给30秒，性能平衡)
-                const timeLimit = targetDepth > 20 ? 30000 : 12000;
+                // 2. 超时检查
+                const timeLimit = targetDepth > 20 ? 45000 : 15000;
                 if (Date.now() - startTime > timeLimit) return false;
 
                 let moves = this.getAllValidReverseMoves();
 
-                // 3. 评分逻辑 (核心策略调整)
+                // 3. 评分逻辑
                 moves.forEach(move => {
-                    const [pr, pc] = move.prevPos;     // 反向跳跃后的位置 (行号 pr)
-                    const [cr, cc] = move.currentPos;  // 跳跃前的位置
+                    const [pr, pc] = move.prevPos;
+                    const [cr, cc] = move.currentPos; // 上一步的位置
                     
-                    // === A. 垂直引导与回跳机制 ===
-                    // pr > cr (往下跳); pr < cr (往上回跳)
+                    // === A. 垂直引导 (保持不变) ===
                     const isGoingUp = pr < cr;
                     const progress = currentDepth / targetDepth;
-                    
                     let verticalScore = 0;
-                    
                     if (progress > 0.85) {
-                        // 【收官阶段 (最后15%)】：必须全力冲向底部
-                        if (isGoingUp) verticalScore = -50.0; // 严禁回头
-                        else verticalScore = pr * 6.0;        // 强力重力
+                        if (isGoingUp) verticalScore = -50.0;
+                        else verticalScore = pr * 6.0;
                     } else {
-                        // 【常规阶段】：
-                        // 基础分：稍微倾向于向下，保证大方向正确
                         verticalScore = pr * 1.5;
-
-                        // 回马枪奖励 (Reverse Jump Bonus)
-                        // 大力鼓励往回跳！这会自然导致棋子在上方或中间区域堆积
-                        // 只要不是在死角(前2行)，就鼓励回跳
-                        if (isGoingUp && pr > 2) {
-                            verticalScore += 12.0; // 巨额奖励，促使路径盘旋
-                        }
+                        if (isGoingUp && pr > 2) verticalScore += 12.0; 
                     }
-                    
                     let score = verticalScore; 
 
-                    // === B. 距离分 (拉长战线) ===
-                    const dist = Math.sqrt(Math.pow(pr - originalTopPos[0], 2) + Math.pow(pc - originalTopPos[1], 2));
-                    score += dist * 1.0;
-                    
-                    // === C. 拥挤度惩罚 (放宽限制) ===
-                    // 为了允许"密集结构"，我们大幅降低拥挤惩罚
+                    // === B. 距离分 (Global Distance) ===
+                    const distToTop = Math.sqrt(Math.pow(pr - originalTopPos[0], 2) + Math.pow(pc - originalTopPos[1], 2));
+                    score += distToTop * 1.0;
+
+                    // === C. 拥挤度/交叉 (保持不变) ===
                     let neighborObstacles = 0;
                     const posKey = `${pr},${pc}`;
                     if (this.indexToAxial.has(posKey)) {
@@ -608,69 +594,63 @@
                             }
                         }
                     }
-                    
-                    // 修改：允许一定程度的拥挤（只要不是被完全包围）
-                    // 以前 >0 就扣分，现在允许 1 个邻居不扣分（甚至可以视为依附）
-                    if (neighborObstacles > 1) score -= 5;  // 轻微惩罚
-                    if (neighborObstacles > 2) score -= 20; // 只有太挤了才重罚
+                    if (neighborObstacles > 1) score -= 2;
+                    if (neighborObstacles > 2) score -= 15;
 
-                    // === D. 随机扰动 ===
-                    const noise = Math.random() * (10 - currentDepth * 0.2);
+                    // === E. 【核心新增】局部排斥力 (Local Repulsion) ===
+                    // 计算反向跳跃的"跨度"。如果是短跳(距离小)，罚分；如果是长跳，加分。
+                    // 这能有效防止在小范围内密集堆叠。
+                    const jumpDist = Math.sqrt(Math.pow(pr - cr, 2) + Math.pow(pc - cc, 2));
+                    
+                    // 鼓励"大跨度"跳跃，这会迫使棋局结构在空间上拉开
+                    // 假设短跳距离约2-4，长跳约4-8
+                    score += jumpDist * 2.5; 
+
+                    // 额外惩罚：如果落点离"上上一步"的位置太近，说明在折返跑 -> 罚分
+                    // 我们希望路径像贪吃蛇一样展开，而不是原地打结
+                    // 这里我们没有直接记录上上一步，但可以用简单的"中心偏离"来代替
+                    // 或者更简单：横向移动奖励 (Horizontal Spread)
+                    // 鼓励列号 (col) 发生大幅变化
+                    const colDiff = Math.abs(pc - cc);
+                    score += colDiff * 2.0; // 鼓励左右横跳，打破垂直堆叠
+
+                    // === F. 随机扰动 ===
+                    const noise = Math.random() * (12 - currentDepth * 0.3);
                     move.score = score + noise;
                 });
 
                 // 4. 排序
                 moves.sort((a, b) => b.score - a.score);
                 
-                // 5. 动态候选宽度 (Adaptive Width)
-                // 性能优化：前期只试前6个，中期（最容易死局）试前12个
+                // 5. 动态宽度 & 剪枝 (保持不变)
                 let limit = 6;
-                if (currentDepth > 5 && currentDepth < targetDepth - 5) {
-                    limit = 12; 
-                }
-                if (targetDepth > 24) limit += 4; // 超高步数稍微放宽
-                
+                if (currentDepth > 5 && currentDepth < targetDepth - 5) limit = 12;
+                if (targetDepth > 24) limit += 4;
                 const candidateLimit = Math.min(moves.length, limit);
-                
-                // 快速失败剪枝
                 let failureCount = 0;
-                
-                for (let i = 0; i < candidateLimit; i++) {
-                    if (failureCount >= 4) break; // 连续4个高分都不行，大概率是死路
 
+                for (let i = 0; i < candidateLimit; i++) {
+                    if (failureCount >= 4) break;
                     const move = moves[i];
                     this.executeReverseMove(move, PLAYER);
                     
-                    // 6. 智能验证 (Smart BFS)
-                    // 性能优化：不用每步必查。
-                    // 策略：每 2 步查一次。这能捕捉绝大多数捷径，同时性能翻倍。
+                    // 6. 验证逻辑 (保持不变)
                     let isValid = true;
                     let checkFrequency = 2;
-                    
-                    // 只有在最后几步（棋盘最满的时候）才每步必查
                     if (currentDepth > targetDepth - 5) checkFrequency = 1;
-
                     if (currentDepth > 2 && currentDepth % checkFrequency === 0) {
                         const solveSteps = this.fastSolver(this.playerPos);
-                        // 允许 1 步误差，防止过度苛刻导致生成失败率飙升
-                        // (例如：生成了25步，实际上是24步，也可以接受)
-                        if (solveSteps < currentDepth) { 
-                            isValid = false; 
-                        }
+                        if (solveSteps < currentDepth) isValid = false;
                     }
 
                     if (isValid) {
-                        if (this.growPathElegant(currentDepth + 1, targetDepth, startTime, originalTopPos)) {
-                            return true;
-                        }
+                        if (this.growPathElegant(currentDepth + 1, targetDepth, startTime, originalTopPos)) return true;
                         failureCount++;
                     } else {
                         failureCount++;
                     }
-
                     this.undoReverseMove(move);
                 }
-
                 return false;
             }
 
