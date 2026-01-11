@@ -548,30 +548,54 @@
                 return candidates[Math.floor(Math.random() * candidates.length)];
             }
             
-            // 8.0 专家级：严格验证逻辑
+            // 15.0 最终性能版：支持高步数 + 鼓励顶部密集 + 性能平衡
             growPathElegant(currentDepth, targetDepth, startTime, originalTopPos) {
                 // 1. 成功出口
                 if (currentDepth >= targetDepth) return true;
                 
-                // 超时检查 (高步数给更多时间)
-                const timeLimit = targetDepth > 20 ? 20000 : 10000;
+                // 2. 超时检查 (30步给30秒，性能平衡)
+                const timeLimit = targetDepth > 20 ? 30000 : 12000;
                 if (Date.now() - startTime > timeLimit) return false;
 
                 let moves = this.getAllValidReverseMoves();
 
-                // 2. 评分逻辑 (专家级优化)
+                // 3. 评分逻辑 (核心策略调整)
                 moves.forEach(move => {
-                    const [pr, pc] = move.prevPos;
+                    const [pr, pc] = move.prevPos;     // 反向跳跃后的位置 (行号 pr)
+                    const [cr, cc] = move.currentPos;  // 跳跃前的位置
                     
-                    // A. 垂直引导: 依然最重要
-                    let score = pr * 3.0; 
+                    // === A. 垂直引导与回跳机制 ===
+                    // pr > cr (往下跳); pr < cr (往上回跳)
+                    const isGoingUp = pr < cr;
+                    const progress = currentDepth / targetDepth;
+                    
+                    let verticalScore = 0;
+                    
+                    if (progress > 0.85) {
+                        // 【收官阶段 (最后15%)】：必须全力冲向底部
+                        if (isGoingUp) verticalScore = -50.0; // 严禁回头
+                        else verticalScore = pr * 6.0;        // 强力重力
+                    } else {
+                        // 【常规阶段】：
+                        // 基础分：稍微倾向于向下，保证大方向正确
+                        verticalScore = pr * 1.5;
 
-                    // B. 距离分
+                        // 回马枪奖励 (Reverse Jump Bonus)
+                        // 大力鼓励往回跳！这会自然导致棋子在上方或中间区域堆积
+                        // 只要不是在死角(前2行)，就鼓励回跳
+                        if (isGoingUp && pr > 2) {
+                            verticalScore += 12.0; // 巨额奖励，促使路径盘旋
+                        }
+                    }
+                    
+                    let score = verticalScore; 
+
+                    // === B. 距离分 (拉长战线) ===
                     const dist = Math.sqrt(Math.pow(pr - originalTopPos[0], 2) + Math.pow(pc - originalTopPos[1], 2));
-                    score += dist * 1.5;
-
-                    // C. 拥挤度惩罚 (非常关键!)
-                    // 检查反向落点周围是否有太多障碍物。如果有，说明这里很挤，容易死路。
+                    score += dist * 1.0;
+                    
+                    // === C. 拥挤度惩罚 (放宽限制) ===
+                    // 为了允许"密集结构"，我们大幅降低拥挤惩罚
                     let neighborObstacles = 0;
                     const posKey = `${pr},${pc}`;
                     if (this.indexToAxial.has(posKey)) {
@@ -584,42 +608,53 @@
                             }
                         }
                     }
-                    // 只要有一个邻居是障碍物，就扣分；如果有两个，重罚
-                    if (neighborObstacles > 0) score -= 5;
-                    if (neighborObstacles > 1) score -= 20;
+                    
+                    // 修改：允许一定程度的拥挤（只要不是被完全包围）
+                    // 以前 >0 就扣分，现在允许 1 个邻居不扣分（甚至可以视为依附）
+                    if (neighborObstacles > 1) score -= 5;  // 轻微惩罚
+                    if (neighborObstacles > 2) score -= 20; // 只有太挤了才重罚
 
-                    // D. 随机扰动 (随着深度增加而减少，前期随机探索，后期稳扎稳打)
+                    // === D. 随机扰动 ===
                     const noise = Math.random() * (10 - currentDepth * 0.2);
                     move.score = score + noise;
                 });
 
-                // 3. 排序与剪枝
+                // 4. 排序
                 moves.sort((a, b) => b.score - a.score);
                 
-                // 专家级：尝试更多可能性，避免因为贪心错过唯一解
-                // 低步数试前6个，高步数试前12个
-                const candidateLimit = targetDepth > 15 ? 12 : 6;
+                // 5. 动态候选宽度 (Adaptive Width)
+                // 性能优化：前期只试前6个，中期（最容易死局）试前12个
+                let limit = 6;
+                if (currentDepth > 5 && currentDepth < targetDepth - 5) {
+                    limit = 12; 
+                }
+                if (targetDepth > 24) limit += 4; // 超高步数稍微放宽
                 
-                for (let i = 0; i < Math.min(moves.length, candidateLimit); i++) {
+                const candidateLimit = Math.min(moves.length, limit);
+                
+                // 快速失败剪枝
+                let failureCount = 0;
+                
+                for (let i = 0; i < candidateLimit; i++) {
+                    if (failureCount >= 4) break; // 连续4个高分都不行，大概率是死路
+
                     const move = moves[i];
-                    
                     this.executeReverseMove(move, PLAYER);
                     
-                    // === 专家级验证逻辑 ===
+                    // 6. 智能验证 (Smart BFS)
+                    // 性能优化：不用每步必查。
+                    // 策略：每 2 步查一次。这能捕捉绝大多数捷径，同时性能翻倍。
                     let isValid = true;
+                    let checkFrequency = 2;
                     
-                    // 为了性能，不必每一步都查 BFS。但也不敢隔太久。
-                    // 策略：前 10 步每 2 步查一次；10 步以后每 1 步都要查！
-                    // 因为捷径往往是在后期（棋盘拥挤时）产生的。
-                    // const checkFrequency = currentDepth > 10 ? 1 : 2;
-                    const checkFrequency = 1;
-                    
+                    // 只有在最后几步（棋盘最满的时候）才每步必查
+                    if (currentDepth > targetDepth - 5) checkFrequency = 1;
+
                     if (currentDepth > 2 && currentDepth % checkFrequency === 0) {
                         const solveSteps = this.fastSolver(this.playerPos);
-                        
-                        // 严格模式：不允许任何捷径误差
-                        // 允许误差会导致生成出"标称30步，实际10步"的废关卡
-                        if (solveSteps < currentDepth + 1) { 
+                        // 允许 1 步误差，防止过度苛刻导致生成失败率飙升
+                        // (例如：生成了25步，实际上是24步，也可以接受)
+                        if (solveSteps < currentDepth) { 
                             isValid = false; 
                         }
                     }
@@ -628,6 +663,9 @@
                         if (this.growPathElegant(currentDepth + 1, targetDepth, startTime, originalTopPos)) {
                             return true;
                         }
+                        failureCount++;
+                    } else {
+                        failureCount++;
                     }
 
                     this.undoReverseMove(move);
