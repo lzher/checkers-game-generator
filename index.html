@@ -254,11 +254,27 @@
             
             <div class="controls">
                 <div class="level-controls" style="width: 100%; display: flex; justify-content: center; gap: 10px; margin-bottom: 10px; flex-wrap: wrap;">
-                    <select id="difficultySelect" style="padding: 12px; border-radius: 8px; border: 1px solid #ccc; font-size: 1rem;">
-                        <option value="low">低难度</option>
-                        <option value="medium" selected>中难度</option>
-                        <option value="high">高难度</option>
+                    <!-- 1. 步数输入框 (这是实际生效的值) -->
+                    <label style="font-weight: bold; color: #2c3e50; display: flex; align-items: center; height: 100%;">目标步数:</label>
+                    <input type="number" id="stepInput" value="5" min="1" max="50" 
+                        style="width: 60px; padding: 10px; border-radius: 8px; border: 1px solid #bdc3c7; font-size: 1rem; text-align: center;">
+
+                    <div style="display: flex; align-items: center; gap: 5px; margin-left: 10px;">
+                        <input type="checkbox" id="forceBottomStart" checked style="width: 18px; height: 18px; cursor: pointer;">
+                        <label for="forceBottomStart" style="cursor: pointer; user-select: none;">强制底部起点</label>
+                    </div>
+
+                    <!-- 2. 快速选择下拉框 (仅用于改变输入框的值) -->
+                    <select id="difficultyPreset" style="padding: 10px; border-radius: 8px; border: 1px solid #bdc3c7; background-color: white;">
+                        <option value="5">简单 (5步)</option>
+                        <option value="10">中等 (10步)</option>
+                        <option value="15">困难 (15步)</option>
+                        <option value="20">专家 (20步)</option>
+                        <option value="25">地狱 (25步)</option>
+                        <option value="-1">自定义</option>
                     </select>
+
+
                     <button id="generateBtn" style="background-color: #9b59b6; color: white;">生成关卡</button>
                     <button id="hintBtn" style="background-color: #34495e; color: white;">显示答案</button>
                     <button id="copyBtn" style="background-color: #2ecc71; color: white;">复制关卡代码</button>
@@ -359,9 +375,6 @@
                 this.selected = null;
                 this.hintPath = null;
                 
-                // 保存初始状态
-                this.saveState();
-                
                 // 更新UI显示
                 this.updateUI();
             }
@@ -454,136 +467,174 @@
                 this.createAxialMapping();
             }
 
-            generateLevel(difficulty) {
-                // 难度设置
-                let minSteps = 5;
-                let targetBranching = 1.2; // 低难度分支少
+            // 10.0 灵活版：支持可选的底部起点约束
+            generateLevel(targetSteps) {
+                targetSteps = parseInt(targetSteps) || 5;
+                const timeout = Math.max(3000, targetSteps * 1500); 
                 
-                if (difficulty === 'medium') { 
-                    minSteps = 10; 
-                    targetBranching = 1.5; // 中难度分支适中
-                }
-                if (difficulty === 'high') { 
-                    minSteps = 12; // 步数不必太高，重点是分支
-                    targetBranching = 2.2; // 高难度分支多
-                }
+                // 读取复选框状态
+                const forceBottom = document.getElementById('forceBottomStart').checked;
                 
-                // 1. 清空棋盘
-                this.board = this.createEmptyBoard();
-                this.boardColors = this.createEmptyColorLayer();
-                this.createAxialMapping(); 
+                console.log(`🚀 开始生成 ${targetSteps} 步关卡 | 强制底部起点: ${forceBottom}`);
 
-                // 2. 随机选择起点（顶部）和 终点（底部）
-                // 恢复为原来的逻辑：只确定起点，终点不固定（只要到达底部区域即可）
-                // 这样可以大大提高生成成功率
-                
                 const startTime = Date.now();
-                const TIME_LIMIT = 10000; // 10秒超时
-                
                 let success = false;
-                let bestLevel = null;
-                let maxFoundSteps = 0;
+
+                while (Date.now() - startTime < timeout) {
+                    this.board = this.createEmptyBoard();
+                    this.boardColors = this.createEmptyColorLayer();
+                    this.createAxialMapping();
+
+                    // 反向起点（游戏终点）始终在顶部
+                    const endPos = this.getRandomTopTrianglePos(); 
+                    if (!endPos) continue;
+
+                    this.board[endPos[0]][endPos[1]] = PLAYER;
+                    this.playerPos = [...endPos];
+
+                    if (this.growPathElegant(0, targetSteps, startTime, endPos)) {
+                        
+                        // === 校验逻辑 ===
+                        if (forceBottom) {
+                            const [startR, startC] = this.playerPos;
+                            // 必须在倒数4行内 (BOARD_ROWS - 4)
+                            if (startR >= BOARD_ROWS - 4) {
+                                success = true;
+                            }
+                        } else {
+                            //如果不强制，只要生成成功就算成功
+                            success = true;
+                        }
+
+                        if (success) {
+                            this.saveCurrentLevel();
+                            console.log(`✅ 生成成功!`);
+                            this.restart(); 
+                            return;
+                        }
+                    }
+                }
                 
-                // 确定起点 (游戏结束位置，生成器的Start)
-                let startCandidates = [];
+                const spent = ((Date.now() - startTime) / 1000).toFixed(1);
+                console.warn(`生成超时。`);
+                
+                let msg = `生成失败！\n在 ${spent} 秒内未找到 ${targetSteps} 步的解。`;
+                if (forceBottom) msg += `\n(已开启"强制底部起点"，这会显著增加生成难度)`;
+                
+                alert(msg);
+                this.draw();
+            }
+
+            // 获取顶部 4 行的随机位置
+            getRandomTopTrianglePos() {
+                const candidates = [];
+                // 扫描前 4 行 (0, 1, 2, 3)
                 for (let r = 0; r < 4; r++) {
                     for (let c = 0; c < BOARD_COLS; c++) {
                         if (this.board[r][c] !== INVALID) {
-                            startCandidates.push([r, c]);
+                            candidates.push([r, c]);
                         }
                     }
                 }
+                if (candidates.length === 0) return null;
+                return candidates[Math.floor(Math.random() * candidates.length)];
+            }
+            
+            // 8.0 专家级：严格验证逻辑
+            growPathElegant(currentDepth, targetDepth, startTime, originalTopPos) {
+                // 1. 成功出口
+                if (currentDepth >= targetDepth) return true;
                 
-                // 目标终点区域 (仅用于启发式引导，不强制)
-                let endCandidates = [];
-                for (let r = 13; r < BOARD_ROWS; r++) {
-                    for (let c = 0; c < BOARD_COLS; c++) {
-                        if (this.board[r][c] !== INVALID) {
-                            endCandidates.push([r, c]);
+                // 超时检查 (高步数给更多时间)
+                const timeLimit = targetDepth > 20 ? 20000 : 10000;
+                if (Date.now() - startTime > timeLimit) return false;
+
+                let moves = this.getAllValidReverseMoves();
+
+                // 2. 评分逻辑 (专家级优化)
+                moves.forEach(move => {
+                    const [pr, pc] = move.prevPos;
+                    
+                    // A. 垂直引导: 依然最重要
+                    let score = pr * 3.0; 
+
+                    // B. 距离分
+                    const dist = Math.sqrt(Math.pow(pr - originalTopPos[0], 2) + Math.pow(pc - originalTopPos[1], 2));
+                    score += dist * 1.5;
+
+                    // C. 拥挤度惩罚 (非常关键!)
+                    // 检查反向落点周围是否有太多障碍物。如果有，说明这里很挤，容易死路。
+                    let neighborObstacles = 0;
+                    const posKey = `${pr},${pc}`;
+                    if (this.indexToAxial.has(posKey)) {
+                        const [q, r] = this.indexToAxial.get(posKey);
+                        for (const [dq, dr] of AXIAL_DIRS) {
+                            const nKey = `${q+dq},${r+dr}`;
+                            if (this.axialToIndex.has(nKey)) {
+                                const [nr, nc] = this.axialToIndex.get(nKey);
+                                if (this.board[nr][nc] === OBSTACLE) neighborObstacles++;
+                            }
                         }
                     }
-                }
+                    // 只要有一个邻居是障碍物，就扣分；如果有两个，重罚
+                    if (neighborObstacles > 0) score -= 5;
+                    if (neighborObstacles > 1) score -= 20;
 
-                // 尝试多次生成
-                for(let i=0; i<50; i++) {
-                    // 超时检查
-                    if (Date.now() - startTime > TIME_LIMIT) {
-                        console.warn("Generation timed out!");
-                        break;
-                    }
+                    // D. 随机扰动 (随着深度增加而减少，前期随机探索，后期稳扎稳打)
+                    const noise = Math.random() * (10 - currentDepth * 0.2);
+                    move.score = score + noise;
+                });
 
-                    // 重置棋盘
-                    this.board = this.createEmptyBoard();
-                    this.boardColors = this.createEmptyColorLayer();
+                // 3. 排序与剪枝
+                moves.sort((a, b) => b.score - a.score);
+                
+                // 专家级：尝试更多可能性，避免因为贪心错过唯一解
+                // 低步数试前6个，高步数试前12个
+                const candidateLimit = targetDepth > 15 ? 12 : 6;
+                
+                for (let i = 0; i < Math.min(moves.length, candidateLimit); i++) {
+                    const move = moves[i];
                     
-                    // 随机选择起点
-                    const [startR, startC] = startCandidates[Math.floor(Math.random() * startCandidates.length)];
+                    this.executeReverseMove(move, PLAYER);
                     
-                    // 随机选择一个引导目标（仅作为磁铁，不强制到达）
-                    const [endR, endC] = endCandidates[Math.floor(Math.random() * endCandidates.length)];
+                    // === 专家级验证逻辑 ===
+                    let isValid = true;
                     
-                    // 设置生成器起点 (Game End)
-                    this.board[startR][startC] = PLAYER;
-                    this.playerPos = [startR, startC];
+                    // 为了性能，不必每一步都查 BFS。但也不敢隔太久。
+                    // 策略：前 10 步每 2 步查一次；10 步以后每 1 步都要查！
+                    // 因为捷径往往是在后期（棋盘拥挤时）产生的。
+                    const checkFrequency = currentDepth > 10 ? 1 : 2;
                     
-                    const targetPos = [endR, endC];
-
-                    // 3. 递归回溯生成主干路径
-                    const reservedCells = new Set();
-                    
-                    // 传入 targetPos 但仅作参考
-                    // 生成时稍微多要求一点步数
-                    if (this.generatePathRecursively(0, minSteps + 2, reservedCells, difficulty, targetPos, startTime)) {
-                        // 关键验证：检查生成的骨架是否存在捷径
-                        const actualPath = this.solveGameBFS(this.board, this.playerPos);
-                        const actualSteps = actualPath ? actualPath.length - 1 : 0;
+                    if (currentDepth > 2 && currentDepth % checkFrequency === 0) {
+                        const solveSteps = this.fastSolver(this.playerPos);
                         
-                        if (actualPath && actualSteps >= minSteps) {
-                            success = true;
-                            break;
-                        }
-                        
-                        // 记录最佳结果
-                        if (actualPath && actualSteps > maxFoundSteps) {
-                            maxFoundSteps = actualSteps;
-                            bestLevel = {
-                                board: this.board.map(row => [...row]),
-                                boardColors: this.boardColors.map(row => [...row]),
-                                playerPos: [...this.playerPos]
-                            };
+                        // 严格模式：不允许任何捷径误差
+                        // 允许误差会导致生成出"标称30步，实际10步"的废关卡
+                        if (solveSteps < currentDepth + 1) { 
+                            isValid = false; 
                         }
                     }
-                }
-                
-                if (!success) {
-                    if (bestLevel && maxFoundSteps >= Math.max(5, minSteps * 0.6)) {
-                        // 如果有尚可的备选方案（至少达到目标60%），则使用它
-                        this.board = bestLevel.board;
-                        this.boardColors = bestLevel.boardColors;
-                        this.playerPos = bestLevel.playerPos;
-                        this.createAxialMapping();
-                        console.log(`未达到目标步数 ${minSteps}，降级使用 ${maxFoundSteps} 步的关卡`);
-                    } else {
-                        alert(`生成关卡失败（无法满足步数要求，最高 ${maxFoundSteps} 步），请重试`);
-                        return;
+
+                    if (isValid) {
+                        if (this.growPathElegant(currentDepth + 1, targetDepth, startTime, originalTopPos)) {
+                            return true;
+                        }
                     }
+
+                    this.undoReverseMove(move);
                 }
-                
-                // 4. 计算保留区域（确保主路径不被堵塞）
-                // 获取当前解法路径
-                const solutionPath = this.solveGameBFS(this.board, this.playerPos);
-                const reservedSet = this.getReservedCellsFromPath(solutionPath);
-                
-                // 5. 增加干扰项（提升分支系数）
-                // 这里的策略是：添加障碍物，然后检查分支系数，直到达标
-                this.addDecoysSmartly(targetBranching, reservedSet, minSteps, solutionPath);
-                
-                // 6. 保存关卡
+
+                return false;
+            }
+
+            // 辅助方法：保存生成的关卡数据
+            saveCurrentLevel() {
                 this.currentLevel = {
                     obstacles: [],
-                    player: this.playerPos
+                    player: [...this.playerPos]
                 };
                 
+                // 遍历全图，把所有障碍物存起来
                 for(let r=0; r<BOARD_ROWS; r++) {
                     for(let c=0; c<BOARD_COLS; c++) {
                         if(this.board[r][c] === OBSTACLE) {
@@ -591,417 +642,85 @@
                         }
                     }
                 }
-                
-                // 重置游戏
-                this.history = [];
-                this.moveCount = 0;
-                this.remainingPieces = this.currentLevel.obstacles.length;
-                this.gameWon = false;
-                this.selected = null;
-                this.hintPath = null;
-                this.saveState();
-                this.updateUI();
-                this.draw();
-                
-                // 显示提示
-                const victoryMsg = document.getElementById('victoryMessage');
-                victoryMsg.style.display = 'block';
-                const finalSol = this.solveGameBFS(this.board, this.playerPos);
-                // 此时不需要重新计算分支系数，直接估算或者再算一次
-                const avgBranching = this.calculateAvgBranchingFactor(finalSol);
-                victoryMsg.innerHTML = `生成成功！<br>最短步数: ${finalSol ? finalSol.length-1 : '?'} <br>平均分支: ${avgBranching.toFixed(1)}`;
-                setTimeout(() => {
-                    victoryMsg.style.display = 'none';
-                }, 3000);
             }
 
-            // 从路径中提取所有保留格子（起点、终点、中间被吃掉的子、路径经过的空格）
-            getReservedCellsFromPath(path) {
-                const reserved = new Set();
-                if (!path) return reserved;
-                
-                // 添加起始点
-                reserved.add(`${path[0][0]},${path[0][1]}`);
-                
-                for (let i = 0; i < path.length - 1; i++) {
-                    const [r1, c1] = path[i];
-                    const [r2, c2] = path[i+1];
-                    
-                    // 目标点
-                    reserved.add(`${r2},${c2}`);
-                    
-                    // 计算中间点和路径点
-                    const jumpInfo = this.analyzeJump(r1, c1, r2, c2);
-                    if (jumpInfo) {
-                        const { mid, pathCells } = jumpInfo;
-                        reserved.add(`${mid[0]},${mid[1]}`);
-                        pathCells.forEach(([pr, pc]) => reserved.add(`${pr},${pc}`));
-                    }
-                }
-                return reserved;
+            // 封装底层操作，让主逻辑更清晰
+            executeReverseMove(move, playerVal) {
+                const [pr, pc] = move.prevPos;
+                const [mr, mc] = move.midPos;
+                const [cr, cc] = move.currentPos;
+                this.board[cr][cc] = EMPTY;
+                this.board[pr][pc] = playerVal;
+                this.board[mr][mc] = OBSTACLE;
+                this.boardColors[mr][mc] = move.color;
+                this.playerPos = [pr, pc];
             }
-            
-            analyzeJump(r1, c1, r2, c2) {
-                const startKey = `${r1},${c1}`;
-                const targetKey = `${r2},${c2}`;
-                if (!this.indexToAxial.has(startKey) || !this.indexToAxial.has(targetKey)) return null;
-                
-                const [q1, aq1] = this.indexToAxial.get(startKey);
-                const [q2, aq2] = this.indexToAxial.get(targetKey);
-                
-                const dq = q2 - q1;
-                const dr = aq2 - aq1;
-                
-                // 寻找最大公约数或直接判断倍数
-                // 简单处理：遍历方向
-                for(const [dirQ, dirR] of AXIAL_DIRS) {
-                     // 检查是否是该方向
-                     // dq = k * dirQ, dr = k * dirR
-                     let k = 0;
-                     if (dirQ !== 0) k = dq / dirQ;
-                     else if (dirR !== 0) k = dr / dirR;
-                     
-                     if (k > 0 && Math.round(k * dirQ) === dq && Math.round(k * dirR) === dr) {
-                         // 找到了方向和倍数 k (factor)
-                         const midK = k / 2;
-                         const midQ = q1 + midK * dirQ;
-                         const midR = aq1 + midK * dirR;
-                         
-                         const pathCells = [];
-                         for(let i=1; i<k; i++) {
-                             if(i === midK) continue;
-                             const pq = q1 + i * dirQ;
-                             const pr = aq1 + i * dirR;
-                             if(this.axialToIndex.has(`${pq},${pr}`)) {
-                                 pathCells.push(this.axialToIndex.get(`${pq},${pr}`));
-                             }
-                         }
-                         
-                         if(this.axialToIndex.has(`${midQ},${midR}`)) {
-                             return {
-                                 mid: this.axialToIndex.get(`${midQ},${midR}`),
-                                 pathCells: pathCells
-                             };
-                         }
-                     }
-                }
-                return null;
-            }
-            
-            addDecoysSmartly(targetBranching, reservedSet, minSteps, initialPath) {
-                let currentBranching = this.calculateAvgBranchingFactor(initialPath);
-                
-                // 1. 获取候选点（路径周围的点）
-                let candidates = this.getDecoyCandidates(initialPath, reservedSet);
-                
-                // 2. 随机打乱
-                for (let i = candidates.length - 1; i > 0; i--) {
-                    const j = Math.floor(Math.random() * (i + 1));
-                    [candidates[i], candidates[j]] = [candidates[j], candidates[i]];
-                }
-                
-                // 3. 尽力而为：遍历候选点尝试放置
-                // 用户指示：“能加就加，不能加就算了”
-                // 不再强求达到 targetBranching，而是遍历一遍候选集，能放的都放上去
-                let addedCount = 0;
-                // 限制最大添加数量，防止棋盘太乱
-                // 高难度多加点，低难度少加点
-                const maxDecoys = (targetBranching > 2.0) ? 25 : 10; 
-                
-                for (const [r, c] of candidates) {
-                    if (addedCount >= maxDecoys) break;
-                    
-                    // 试着放置
-                    this.board[r][c] = OBSTACLE;
-                    this.createAxialMapping(); 
-                    
-                    // A. 捷径检查（必须保留，否则高难度会变简单）
-                    const newPath = this.solveGameBFS(this.board, this.playerPos);
-                    if (!newPath || (newPath.length - 1) < minSteps) {
-                        // 产生捷径或无解 -> 撤销
-                        this.board[r][c] = EMPTY;
-                        continue;
-                    }
 
-                    // B. 分支系数检查
-                    const newBranching = this.calculateAvgBranchingFactor(newPath);
-                    
-                    // 只要分支系数不降低太多，或者有提升，就保留
-                    // 放宽标准：只要是合法干扰项，就倾向于保留
-                    // 低难度严格限制分支系数，不要太高
-                    if (targetBranching < 1.5 && newBranching > 1.8) {
-                        this.board[r][c] = EMPTY; // 太难了，撤销
-                        continue;
-                    }
+            undoReverseMove(move) {
+                const [pr, pc] = move.prevPos;
+                const [mr, mc] = move.midPos;
+                const [cr, cc] = move.currentPos;
+                this.board[pr][pc] = EMPTY;
+                this.board[mr][mc] = EMPTY;
+                this.boardColors[mr][mc] = null;
+                this.board[cr][cc] = PLAYER;
+                this.playerPos = [cr, cc];
+            }
 
-                    if (newBranching >= currentBranching - 0.1) {
-                        this.assignRandomColor(r, c);
-                        currentBranching = newBranching;
-                        addedCount++;
-                    } else {
-                        // 如果严重降低了分支系数（说明堵住了很多路），则撤销
-                        this.board[r][c] = EMPTY;
-                    }
-                }
+            // 【优雅点3】快速求解器 (原 BFS 的轻量级包装)
+            // 只需要知道"最少几步"，不需要具体的路径数组
+            fastSolver(startPos) {
+                const path = this.solveGameBFS(this.board, startPos);
+                return path ? path.length - 1 : 0;
             }
             
-            getDecoyCandidates(path, reservedSet) {
-                const candidates = [];
-                const visited = new Set();
-                
-                // 遍历路径上的每个点
-                for (const [pr, pc] of path) {
-                     const pKey = `${pr},${pc}`;
-                     if (!this.indexToAxial.has(pKey)) continue;
-                     const [q, r_ax] = this.indexToAxial.get(pKey);
-                     
-                     // 检查6个方向
-                     for (const [dq, dr] of AXIAL_DIRS) {
-                         // 检查距离 1-4 (覆盖所有可能跳跃的中间点位置)
-                         for (let dist = 1; dist <= 4; dist++) { 
-                             const tq = q + dq * dist;
-                             const tr = r_ax + dr * dist;
-                             const key = `${tq},${tr}`;
-                             
-                             if (this.axialToIndex.has(key)) {
-                                 const [cr, cc] = this.axialToIndex.get(key);
-                                 const cKey = `${cr},${cc}`;
-                                 
-                                 // 候选点必须是：未访问过、不是保留点、当前是空位
-                                 if (!visited.has(cKey) && !reservedSet.has(cKey) && this.board[cr][cc] === EMPTY) {
-                                     visited.add(cKey);
-                                     candidates.push([cr, cc]);
-                                 }
-                             }
-                         }
-                     }
-                }
-                return candidates;
-            }
-            
-            calculateAvgBranchingFactor(path) {
-                // 如果未提供 path，则自己计算（兼容旧调用）
-                if (!path) {
-                    path = this.solveGameBFS(this.board, this.playerPos);
-                }
-                if (!path) return 0;
-                
-                let totalBranches = 0;
-                let steps = 0;
-                
-                // 保存当前真实状态
-                const savedBoard = this.board.map(row => [...row]);
-                const savedPlayer = this.playerPos ? [...this.playerPos] : null;
-                const savedColors = this.boardColors.map(row => [...row]);
-                const savedRem = this.remainingPieces;
-                
-                try {
-                    // path: [start, p1, p2, ...]
-                    // 遍历路径上的每一步
-                    for (let i = 0; i < path.length - 1; i++) {
-                        const currentPos = path[i];
-                        const nextPos = path[i+1];
-                        
-                        // 确保玩家在 currentPos (虽然逻辑上应该已经在，但为了保险)
-                        this.board[currentPos[0]][currentPos[1]] = PLAYER;
-                        this.playerPos = currentPos;
-                        this.createAxialMapping();
-                        
-                        // 计算当前位置的所有可能跳跃数
-                        const jumps = this.findAllJumpsFrom(currentPos[0], currentPos[1]);
-                        totalBranches += jumps.length;
-                        steps++;
-                        
-                        // 手动执行跳跃 (不触发UI更新和音效)
-                        const jumpInfo = this.analyzeJump(currentPos[0], currentPos[1], nextPos[0], nextPos[1]);
-                        if (jumpInfo) {
-                            // 清除起点
-                            this.board[currentPos[0]][currentPos[1]] = EMPTY;
-                            // 清除中间
-                            const [mr, mc] = jumpInfo.mid;
-                            this.board[mr][mc] = EMPTY;
-                            this.boardColors[mr][mc] = null;
-                            // 设置终点
-                            this.board[nextPos[0]][nextPos[1]] = PLAYER;
-                            this.playerPos = nextPos;
+            // 保留原有的 getAllValidReverseMoves 和 solveGameBFS 不变
+            // 它们是基础设施，不需要动
+
+            getAllValidReverseMoves() {
+                const moves = [];
+                const currKey = `${this.playerPos[0]},${this.playerPos[1]}`;
+                if (!this.indexToAxial.has(currKey)) return [];
+
+                const [currQ, currR] = this.indexToAxial.get(currKey);
+                const colors = ['#FF0000', '#00FF00', '#0000FF', '#FFFF00', '#FF00FF'];
+
+                for (const [dirQ, dirR] of AXIAL_DIRS) {
+                    // 优化：只尝试常用跳跃距离，避免过于奇怪的超长跳跃导致难以解题
+                    // 依然保留 2,4,6,8，但你可以尝试去掉 6,8 看看生成的图是否更紧凑
+                    for (const factor of [2, 4, 6, 8]) {
+                        // 计算反向落点 (Jump Start)
+                        const prevQ = currQ + dirQ * factor;
+                        const prevR = currR + dirR * factor;
+                        const prevKey = `${prevQ},${prevR}`;
+
+                        // 计算被吃掉的子 (Jump Middle)
+                        const midQ = currQ + dirQ * (factor / 2);
+                        const midR = currR + dirR * (factor / 2);
+                        const midKey = `${midQ},${midR}`;
+
+                        if (!this.axialToIndex.has(prevKey) || !this.axialToIndex.has(midKey)) continue;
+
+                        const [pr, pc] = this.axialToIndex.get(prevKey);
+                        const [mr, mc] = this.axialToIndex.get(midKey);
+
+                        // 合法性检查：
+                        // 1. 落点必须是空的
+                        // 2. 中间复活点必须是空的
+                        // 3. (可选优化) 落点周围不能太拥挤，否则容易死路
+                        if (this.board[pr][pc] === EMPTY && this.board[mr][mc] === EMPTY) {
+                            moves.push({
+                                prevPos: [pr, pc],
+                                midPos: [mr, mc],
+                                currentPos: this.playerPos,
+                                color: colors[Math.floor(Math.random() * colors.length)]
+                            });
                         }
                     }
-                } catch (e) {
-                    console.error("Branching calculation error", e);
-                } finally {
-                    // 恢复状态
-                    this.board = savedBoard;
-                    this.boardColors = savedColors;
-                    this.playerPos = savedPlayer;
-                    this.remainingPieces = savedRem;
-                    this.createAxialMapping();
                 }
-                
-                return steps > 0 ? totalBranches / steps : 0;
+                return moves;
             }
 
-            // 递归生成路径（回溯法）
-            generatePathRecursively(currentSteps, minSteps, reservedCells, difficulty, targetPos, startTime) {
-                // 超时检查
-                if (Date.now() - startTime > 10000) return false;
-
-                // 1. 终止条件：在底部 且 步数达标
-                // 不强制精确到达 targetPos，只要到达底部区域即可
-                const inBottomTriangle = this.playerPos[0] >= 13;
-                if (inBottomTriangle && currentSteps >= minSteps) {
-                    return true;
-                }
-                
-                // 2. 剪枝：如果已经太深但还没到底，或者步数过多
-                if (currentSteps > minSteps + 15) return false;
-                
-                // 3. 获取所有可能的反向跳跃
-                const possibleJumps = this.getAllReverseJumps(this.playerPos[0], this.playerPos[1], reservedCells);
-                
-                if (possibleJumps.length === 0) return false;
-                
-                // 4. 启发式排序
-                const progress = currentSteps / minSteps;
-                
-                possibleJumps.sort((a, b) => {
-                    const [rA, cA, mA, cmA, factorA] = a;
-                    const [rB, cB, mB, cmB, factorB] = b;
-                    
-                    // A. 强制约束：前期严禁直接跳进底部三角区 (保持原样)
-                    const inBottomA = rA >= 13;
-                    const inBottomB = rB >= 13;
-                    if (progress < 0.8) {
-                        if (inBottomA !== inBottomB) return inBottomA ? 1 : -1;
-                    }
-
-                    // B. 阶段性策略
-                    if (progress < 0.75) {
-                        // 【前期策略】：最大化利用棋盘宽度 (横向移动)
-                        
-                        // 1. 优先横向移动 (Row变化小)
-                        // 这是增加步数的关键，像贪吃蛇一样扫荡
-                        const diffRowA = Math.abs(rA - this.playerPos[0]);
-                        const diffRowB = Math.abs(rB - this.playerPos[0]);
-                        if (diffRowA !== diffRowB) {
-                            // 优先选择行变化小的 (横向)
-                            // 给予巨大权重
-                            return (diffRowA - diffRowB) * 5;
-                        }
-                        
-                        // 2. 保持在中间区域 (Rows 4-12)
-                        // 避免过早去底部，也避免一直卡在顶部
-                        const distMidA = Math.abs(rA - 8);
-                        const distMidB = Math.abs(rB - 8);
-                        
-                        // 3. 优先长距离
-                        const scoreFactorA = factorA * 3;
-                        const scoreFactorB = factorB * 3;
-                        
-                        // 4. 随机因子 (高难度下非常重要)
-                        const random = Math.random() * 8;
-                        
-                        // 综合打分
-                        // 距离中间越近越好 (distMid越小越好)
-                        const scoreA = scoreFactorA - distMidA + random;
-                        const scoreB = scoreFactorB - distMidB;
-                        
-                        return scoreB - scoreA;
-                        
-                    } else {
-                        // 【后期策略】：冲刺
-                        // 目标引导：优先选择距离目标点更近的跳跃
-                        if (targetPos) {
-                            // 计算当前位置到目标的距离（简单行距 + 列距）
-                            // 注意：这里需要计算 jumpTo 位置到 targetPos 的距离
-                            const distA = Math.abs(rA - targetPos[0]) + Math.abs(cA - targetPos[1]);
-                            const distB = Math.abs(rB - targetPos[0]) + Math.abs(cB - targetPos[1]);
-                            return distA - distB; // 距离越小越好
-                        }
-                        
-                        if (inBottomA !== inBottomB) return inBottomA ? -1 : 1;
-                        return rB - rA; // 越靠下越好
-                    }
-                });
-                
-                // 5. 尝试跳跃
-                const maxBranch = difficulty === 'medium' ? 5 : 5;
-                const topMoves = possibleJumps.slice(0, maxBranch);
-                
-                if (Math.random() > 0.3 && topMoves.length > 1) {
-                    const idx1 = Math.floor(Math.random() * topMoves.length);
-                    const idx2 = Math.floor(Math.random() * topMoves.length);
-                    [topMoves[idx1], topMoves[idx2]] = [topMoves[idx2], topMoves[idx1]];
-                }
-                
-                for (const move of topMoves) {
-                    const [jumpToR, jumpToC, midR, midC, factor] = move;
-                    
-                    // 记录状态用于回溯
-                    const prevPlayerPos = [...this.playerPos];
-                    const addedReserved = [];
-                    
-                    // 执行反向跳跃
-                    // 原位置(当前Player)变空
-                    this.board[prevPlayerPos[0]][prevPlayerPos[1]] = EMPTY;
-                    // 中间变障碍
-                    this.board[midR][midC] = OBSTACLE;
-                    this.assignRandomColor(midR, midC);
-                    // 目标位置变Player
-                    this.board[jumpToR][jumpToC] = PLAYER;
-                    this.playerPos = [jumpToR, jumpToC];
-                    
-                    // 更新reservedCells
-                    // 保护：原位置(正向跳跃落点)
-                    const originKey = `${prevPlayerPos[0]},${prevPlayerPos[1]}`;
-                    if (!reservedCells.has(originKey)) {
-                        reservedCells.add(originKey);
-                        addedReserved.push(originKey);
-                    }
-                    
-                    // 保护：路径上的空位
-                    const [q1, r1] = this.indexToAxial.get(`${prevPlayerPos[0]},${prevPlayerPos[1]}`);
-                    const [q2, r2] = this.indexToAxial.get(`${jumpToR},${jumpToC}`);
-                    const dq = (q2 - q1) / factor;
-                    const dr = (r2 - r1) / factor;
-                    for (let i = 1; i < factor; i++) {
-                        if (i === factor/2) continue;
-                        const pathQ = q1 + dq * i;
-                        const pathR = r1 + dr * i;
-                        const pathKey = `${pathQ},${pathR}`;
-                        if (this.axialToIndex.has(pathKey)) {
-                            const [pR, pC] = this.axialToIndex.get(pathKey);
-                            const pKey = `${pR},${pC}`;
-                            if (!reservedCells.has(pKey)) {
-                                reservedCells.add(pKey);
-                                addedReserved.push(pKey);
-                            }
-                        }
-                    }
-                    
-                    // 递归下一层
-                    if (this.generatePathRecursively(currentSteps + 1, minSteps, reservedCells)) {
-                        return true;
-                    }
-                    
-                    // 回溯（撤销操作）
-                    this.playerPos = prevPlayerPos;
-                    this.board[jumpToR][jumpToC] = EMPTY;
-                    this.board[midR][midC] = EMPTY;
-                    this.boardColors[midR][midC] = null;
-                    this.board[prevPlayerPos[0]][prevPlayerPos[1]] = PLAYER;
-                    
-                    // 撤销reserved
-                    addedReserved.forEach(key => reservedCells.delete(key));
-                }
-                
-                return false;
-            }
-            
-            assignRandomColor(r, c) {
-                const colorKeys = Object.keys(COLORS).filter(k => !['BG','EMPTY','PLAYER','SELECTED','HIGHLIGHT','WIN_AREA','WIN_AREA_BG','WIN_AREA_BORDER'].includes(k));
-                this.boardColors[r][c] = COLORS[colorKeys[Math.floor(Math.random() * colorKeys.length)]];
-            }
-            
             // 广度优先搜索求解（寻找最短路径）
             solveGameBFS(boardState, playerPos) {
                 // 初始状态
@@ -1380,10 +1099,10 @@
                     return false;
                 }
                 
-                const [or_, oc] = obstaclePos;
+                // === 必须在这里保存状态 ===
+                this.saveState(); 
                 
-                // 保存当前状态
-                this.saveState();
+                const [or_, oc] = obstaclePos;
                 
                 // 起点清空
                 this.board[fr][fc] = EMPTY;
@@ -1431,30 +1150,32 @@
                 this.gameWon = false;
                 return false;
             }
-            
+
+            // 改进版：深拷贝状态
             saveState() {
+                // 限制历史记录，防止内存溢出
+                if (this.history.length > 50) {
+                    this.history.shift();
+                }
+                
                 const state = {
-                    board: this.board.map(row => [...row]),
+                    board: this.board.map(row => [...row]), // 每一行都得拷贝
                     boardColors: this.boardColors.map(row => [...row]),
                     playerPos: this.playerPos ? [...this.playerPos] : null,
                     moveCount: this.moveCount,
                     remainingPieces: this.remainingPieces
                 };
-                this.history.push(state);
                 
-                // 限制历史记录长度
-                if (this.history.length > 20) {
-                    this.history.shift();
-                }
+                this.history.push(state);
             }
             
             undo() {
-                if (this.history.length > 1) {
-                    this.history.pop(); // 移除当前状态
+                // 只要栈里有东西，那个东西就是"上一步之前的样子"
+                if (this.history.length > 0) {
+                    // 1. 弹出最近的一次存档
+                    const prevState = this.history.pop();
                     
-                    // 恢复到上一个状态
-                    const prevState = this.history[this.history.length - 1];
-                    
+                    // 2. 直接恢复这个存档
                     this.board = prevState.board.map(row => [...row]);
                     this.boardColors = prevState.boardColors.map(row => [...row]);
                     this.playerPos = prevState.playerPos ? [...prevState.playerPos] : null;
@@ -1463,19 +1184,18 @@
                     this.selected = null;
                     this.hintPath = null;
                     
-                    // 重新创建坐标映射
+                    // 3. 重建映射与UI
                     this.createAxialMapping();
-                    
-                    // 隐藏胜利消息
                     document.getElementById('victoryMessage').style.display = 'none';
                     this.gameWon = false;
                     
                     this.updateUI();
-                    return true;
+                    this.draw();
+                } else {
+                    console.log("已经回到起点，无法撤销");
                 }
-                return false;
             }
-            
+
             restart() {
                 // 清空历史记录
                 this.history = [];
@@ -1483,25 +1203,38 @@
                 // 重置游戏状态
                 this.board = this.createEmptyBoard();
                 this.boardColors = this.createEmptyColorLayer();
-                this.setupBoard();
+                
+                // 【核心修改】：优先使用当前生成的关卡数据
+                if (this.currentLevel) {
+                    this.loadLevelData(this.currentLevel);
+                } else {
+                    this.setupBoard(); // 只有没生成过才用默认
+                }
+
                 this.createAxialMapping();
                 this.moveCount = 0;
-                this.remainingPieces = 28;
+                
+                // 重新计算剩余棋子数 (遍历棋盘计算，因为不同关卡棋子数不同)
+                this.remainingPieces = 0;
+                for(let r=0; r<BOARD_ROWS; r++) {
+                    for(let c=0; c<BOARD_COLS; c++) {
+                        if(this.board[r][c] === OBSTACLE) this.remainingPieces++;
+                    }
+                }
+                
                 this.gameWon = false;
                 this.selected = null;
                 this.hintPath = null;
                 
-                // 保存初始状态
-                this.saveState();
-                
-                // 隐藏胜利消息
-                document.getElementById('victoryMessage').style.display = 'none';
+                // 隐藏胜利消息 (DOM元素)
+                const victoryMsg = document.getElementById('victoryMessage');
+                if (victoryMsg) victoryMsg.style.display = 'none';
                 
                 // 更新UI和绘制
                 this.updateUI();
                 this.draw();
             }
-            
+
             getPixelPos(row, col) {
                 const CELL_SIZE = 40;
                 const X_OFFSET = this.canvas.width / 2;
@@ -1906,6 +1639,20 @@
                     }
                 });
                 
+                // 联动逻辑：下拉框改变 -> 更新输入框
+                const presetSelect = document.getElementById('difficultyPreset');
+                const stepInput = document.getElementById('stepInput');
+
+                if (presetSelect && stepInput) {
+                    presetSelect.addEventListener('change', (e) => {
+                        const val = parseInt(e.target.value);
+                        if (val !== -1) {
+                            stepInput.value = val;
+                        }
+                        // 如果选了自定义，保持输入框当前值不变，或者清空让用户填
+                    });
+                }
+
                 // 键盘事件
                 document.addEventListener('keydown', (e) => {
                     if (e.ctrlKey && e.key === 'z') {
@@ -1931,10 +1678,14 @@
                     this.restart();
                 });
                 
-                // 新按钮事件
+                // 生成按钮逻辑：直接读取 stepInput 的值
                 document.getElementById('generateBtn').addEventListener('click', () => {
-                    const difficulty = document.getElementById('difficultySelect').value;
-                    this.generateLevel(difficulty);
+                    // 获取输入框的值
+                    let steps = parseInt(stepInput.value);
+                    if (isNaN(steps) || steps < 1) steps = 5; // 默认保底
+                    
+                    // 调用生成函数，传入具体步数
+                    this.generateLevel(steps);
                 });
                 
                 document.getElementById('copyBtn').addEventListener('click', () => {
