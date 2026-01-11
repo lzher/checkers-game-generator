@@ -1,0 +1,1883 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>跳棋游戏</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        
+        body {
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1000px;
+            width: 100%;
+            background-color: rgba(255, 255, 255, 0.95);
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15);
+            padding: 20px;
+            margin-top: 20px;
+        }
+        
+        header {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        
+        h1 {
+            color: #2c3e50;
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+            text-shadow: 1px 1px 3px rgba(0, 0, 0, 0.1);
+        }
+        
+        .subtitle {
+            color: #7f8c8d;
+            font-size: 1.1rem;
+            margin-bottom: 15px;
+        }
+        
+        .game-area {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        
+        .canvas-container {
+            position: relative;
+            margin-bottom: 20px;
+        }
+        
+        canvas {
+            background-color: #f0f0f0;
+            border-radius: 10px;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+            display: block;
+        }
+        
+        .controls {
+            display: flex;
+            justify-content: center;
+            gap: 15px;
+            margin-bottom: 25px;
+            flex-wrap: wrap;
+        }
+        
+        button {
+            padding: 12px 24px;
+            font-size: 1rem;
+            font-weight: 600;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        
+        #undoBtn {
+            background-color: #3498db;
+            color: white;
+        }
+        
+        #undoBtn:hover {
+            background-color: #2980b9;
+            transform: translateY(-2px);
+        }
+        
+        #restartBtn {
+            background-color: #e74c3c;
+            color: white;
+        }
+        
+        #restartBtn:hover {
+            background-color: #c0392b;
+            transform: translateY(-2px);
+        }
+        
+        .stats {
+            display: flex;
+            justify-content: center;
+            gap: 30px;
+            margin-bottom: 20px;
+            background-color: #ecf0f1;
+            padding: 15px 25px;
+            border-radius: 10px;
+            box-shadow: 0 3px 8px rgba(0, 0, 0, 0.08);
+        }
+        
+        .stat-item {
+            text-align: center;
+        }
+        
+        .stat-label {
+            font-size: 0.9rem;
+            color: #7f8c8d;
+            margin-bottom: 5px;
+        }
+        
+        .stat-value {
+            font-size: 1.8rem;
+            font-weight: 700;
+            color: #2c3e50;
+        }
+        
+        .instructions {
+            background-color: #f8f9fa;
+            border-left: 4px solid #3498db;
+            padding: 15px 20px;
+            border-radius: 8px;
+            margin-top: 25px;
+            max-width: 800px;
+        }
+        
+        .instructions h3 {
+            color: #2c3e50;
+            margin-bottom: 10px;
+        }
+        
+        .instructions ul {
+            padding-left: 20px;
+            color: #555;
+            line-height: 1.6;
+        }
+        
+        .instructions li {
+            margin-bottom: 8px;
+        }
+        
+        .victory-message {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: rgba(46, 204, 113, 0.95);
+            color: white;
+            padding: 20px 30px;
+            border-radius: 10px;
+            font-size: 1.8rem;
+            font-weight: bold;
+            text-align: center;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+            z-index: 100;
+            display: none;
+            animation: pulse 2s infinite;
+        }
+        
+        @keyframes pulse {
+            0% { transform: translate(-50%, -50%) scale(1); }
+            50% { transform: translate(-50%, -50%) scale(1.05); }
+            100% { transform: translate(-50%, -50%) scale(1); }
+        }
+        
+        .color-legend {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
+            justify-content: center;
+            margin-top: 20px;
+        }
+        
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .color-box {
+            width: 20px;
+            height: 20px;
+            border-radius: 4px;
+            border: 1px solid rgba(0, 0, 0, 0.2);
+        }
+        
+        .legend-text {
+            font-size: 0.9rem;
+            color: #555;
+        }
+        
+        .victory-area-label {
+            margin-top: 10px;
+            padding: 8px 15px;
+            background: linear-gradient(90deg, rgba(144, 238, 144, 0.3), rgba(60, 179, 113, 0.3));
+            border-radius: 20px;
+            font-size: 0.9rem;
+            color: #2e8b57;
+            font-weight: 600;
+            border: 2px dashed #3cb371;
+        }
+        
+        @media (max-width: 768px) {
+            h1 {
+                font-size: 2rem;
+            }
+            
+            canvas {
+                width: 95vw;
+                height: auto;
+            }
+            
+            .controls {
+                flex-direction: column;
+                align-items: center;
+            }
+            
+            button {
+                width: 200px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>跳棋游戏</h1>
+        <div class="subtitle">吃掉彩色棋子，到达顶部获胜</div>
+    </header>
+    
+    <div class="container">
+        <div class="game-area">
+            <div class="canvas-container">
+                <canvas id="gameCanvas" width="900" height="900"></canvas>
+                <div class="victory-message" id="victoryMessage">🎉 胜利！棋子已到达顶部！</div>
+            </div>
+            
+            <div class="controls">
+                <div class="level-controls" style="width: 100%; display: flex; justify-content: center; gap: 10px; margin-bottom: 10px; flex-wrap: wrap;">
+                    <select id="difficultySelect" style="padding: 12px; border-radius: 8px; border: 1px solid #ccc; font-size: 1rem;">
+                        <option value="low">低难度</option>
+                        <option value="medium" selected>中等难度</option>
+                        <option value="high">高难度</option>
+                    </select>
+                    <button id="generateBtn" style="background-color: #9b59b6; color: white;">生成关卡</button>
+                    <button id="hintBtn" style="background-color: #34495e; color: white;">显示答案</button>
+                    <button id="copyBtn" style="background-color: #2ecc71; color: white;">复制关卡代码</button>
+                    <button id="loadBtn" style="background-color: #f1c40f; color: black;">加载关卡代码</button>
+                </div>
+                <button id="undoBtn">撤销 (Ctrl+Z)</button>
+                <button id="restartBtn">重新开始</button>
+            </div>
+            
+            <div class="stats">
+                <div class="stat-item">
+                    <div class="stat-label">移动步数</div>
+                    <div class="stat-value" id="moveCount">0</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-label">剩余棋子</div>
+                    <div class="stat-value" id="remainingPieces">28</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // -----------------------------------------------------
+        // 游戏常量
+        // -----------------------------------------------------
+        const ROWS_LAYOUT = [1, 2, 3, 4, 13, 12, 11, 10, 9, 10, 11, 12, 13, 4, 3, 2, 1];
+        const BOARD_ROWS = ROWS_LAYOUT.length;
+        const BOARD_COLS = 17;
+        const INVALID = -1;
+        const EMPTY = 0;
+        const OBSTACLE = 1;
+        const PLAYER = 2;
+        
+        // 六方向向量（轴向坐标）
+        const AXIAL_DIRS = [
+            [1, 0], [1, -1], [0, -1], 
+            [-1, 0], [-1, 1], [0, 1]
+        ];
+        
+        // 颜色定义
+        const COLORS = {
+            BG: '#f0f0f0',
+            EMPTY: '#e8e8e8',
+            PLAYER: '#00C853',
+            SELECTED: '#FFB350',
+            HIGHLIGHT: '#78FF78',
+            WIN_AREA: 'rgba(60, 179, 113, 0.3)',
+            WIN_AREA_BG: 'rgba(144, 238, 144, 0.1)',
+            WIN_AREA_BORDER: 'rgba(60, 179, 113, 0.6)',
+            PURPLE: '#A020F0',
+            PINK: '#FF69B4',
+            YELLOW: '#FFD700',
+            ORANGE: '#FF8C00',
+            RED: '#DC143C',
+            BLUE: '#3282FF'
+        };
+        
+        // -----------------------------------------------------
+        // 游戏类
+        // -----------------------------------------------------
+        class Game {
+            constructor() {
+                this.canvas = document.getElementById('gameCanvas');
+                this.ctx = this.canvas.getContext('2d');
+                this.board = null;
+                this.boardColors = null;
+                this.playerPos = null;
+                this.indexToAxial = new Map();
+                this.axialToIndex = new Map();
+                this.selected = null;
+                this.moveCount = 0;
+                this.history = [];
+                this.gameWon = false;
+                this.remainingPieces = 28;
+                this.currentLevel = null;
+                
+                this.initGame(true);
+                this.setupEventListeners();
+                this.draw();
+            }
+            
+            initGame(isFirstInit = false) {
+                // 清空历史记录（除非是第一次初始化）
+                if (!isFirstInit) {
+                    this.history = [];
+                }
+                
+                this.board = this.createEmptyBoard();
+                this.boardColors = this.createEmptyColorLayer();
+                this.setupBoard();
+                this.createAxialMapping();
+                this.moveCount = 0;
+                this.remainingPieces = 28;
+                this.remainingPieces = 28;
+                this.gameWon = false;
+                this.selected = null;
+                this.hintPath = null;
+                
+                // 保存初始状态
+                this.saveState();
+                
+                // 更新UI显示
+                this.updateUI();
+            }
+            
+            createEmptyBoard() {
+                const board = Array(BOARD_ROWS).fill().map(() => Array(BOARD_COLS).fill(INVALID));
+                for (let r = 0; r < BOARD_ROWS; r++) {
+                    const count = ROWS_LAYOUT[r];
+                    const offset = Math.floor((BOARD_COLS - count) / 2);
+                    for (let i = 0; i < count; i++) {
+                        const c = offset + i;
+                        board[r][c] = EMPTY;
+                    }
+                }
+                return board;
+            }
+            
+            createEmptyColorLayer() {
+                return Array(BOARD_ROWS).fill().map(() => Array(BOARD_COLS).fill(null));
+            }
+            
+            logicalToIndex(rowNo, posNo) {
+                const r = rowNo - 1;
+                if (r >= 0 && r < BOARD_ROWS) {
+                    const count = ROWS_LAYOUT[r];
+                    const offset = Math.floor((BOARD_COLS - count) / 2);
+                    const c = offset + (posNo - 1);
+                    if (c >= 0 && c < BOARD_COLS) {
+                        return [r, c];
+                    }
+                }
+                return null;
+            }
+            
+            setupBoard() {
+                if (this.currentLevel) {
+                    this.loadLevelData(this.currentLevel);
+                    return;
+                }
+
+                // 设置障碍物
+                const obstacles = [
+                    [5, 3, COLORS.PURPLE], [5, 11, COLORS.PURPLE],
+                    [6, 5, COLORS.PURPLE], [6, 7, COLORS.PURPLE], [6, 10, COLORS.PURPLE],
+                    [7, 1, COLORS.BLUE], [7, 4, COLORS.BLUE], [7, 7, COLORS.BLUE], [7, 11, COLORS.BLUE],
+                    [8, 5, COLORS.BLUE], [8, 7, COLORS.BLUE], [8, 8, COLORS.BLUE], [8, 9, COLORS.BLUE],
+                    [9, 5, COLORS.PINK], [9, 8, COLORS.PINK],
+                    [10, 2, COLORS.YELLOW], [10, 5, COLORS.YELLOW], [10, 6, COLORS.YELLOW], [10, 8, COLORS.YELLOW],
+                    [11, 1, COLORS.ORANGE], [11, 5, COLORS.ORANGE], [11, 9, COLORS.ORANGE], [11, 10, COLORS.ORANGE],
+                    [13, 3, COLORS.RED], [13, 5, COLORS.RED],
+                    [15, 2, COLORS.RED], [15, 3, COLORS.RED]
+                ];
+                
+                obstacles.forEach(([row, pos, color]) => {
+                    const posIdx = this.logicalToIndex(row, pos);
+                    if (posIdx) {
+                        const [r, c] = posIdx;
+                        this.board[r][c] = OBSTACLE;
+                        this.boardColors[r][c] = color;
+                    }
+                });
+                
+                // 设置玩家
+                const playerPos = this.logicalToIndex(17, 1);
+                if (playerPos) {
+                    const [r, c] = playerPos;
+                    this.board[r][c] = PLAYER;
+                    this.playerPos = [r, c];
+                }
+            }
+
+            loadLevelData(levelData) {
+                // 清空棋盘
+                this.board = this.createEmptyBoard();
+                this.boardColors = this.createEmptyColorLayer();
+                
+                // 设置障碍物
+                levelData.obstacles.forEach(([r, c, color]) => {
+                    this.board[r][c] = OBSTACLE;
+                    this.boardColors[r][c] = color;
+                });
+                
+                // 设置玩家
+                if (levelData.player) {
+                    const [pr, pc] = levelData.player;
+                    this.board[pr][pc] = PLAYER;
+                    this.playerPos = [pr, pc];
+                }
+                
+                this.createAxialMapping();
+            }
+
+            generateLevel(difficulty) {
+                // 难度设置
+                let minSteps = 5;
+                let targetBranching = 1.5; 
+                
+                if (difficulty === 'medium') { 
+                    minSteps = 10; // 降低步数要求
+                    targetBranching = 2.0; 
+                }
+                if (difficulty === 'high') { 
+                    minSteps = 20; // 降低步数要求
+                    targetBranching = 2.5; 
+                }
+                
+                // 1. 清空棋盘
+                this.board = this.createEmptyBoard();
+                this.boardColors = this.createEmptyColorLayer();
+                this.createAxialMapping(); 
+
+                // 2. 随机选择起点（顶部）
+                // 尝试多次以找到合适的起点
+                let success = false;
+                let bestLevel = null;
+                let maxFoundSteps = 0;
+                
+                // 增加尝试次数，因为现在有严格的验证
+                for(let i=0; i<50; i++) {
+                    // 重置棋盘
+                    this.board = this.createEmptyBoard();
+                    this.boardColors = this.createEmptyColorLayer();
+                    
+                    let goalCandidates = [];
+                    for (let r = 0; r < 4; r++) {
+                        for (let c = 0; c < BOARD_COLS; c++) {
+                            if (this.board[r][c] !== INVALID) {
+                                goalCandidates.push([r, c]);
+                            }
+                        }
+                    }
+                    const [startR, startC] = goalCandidates[Math.floor(Math.random() * goalCandidates.length)];
+                    
+                    this.board[startR][startC] = PLAYER;
+                    this.playerPos = [startR, startC];
+                    
+                    // 3. 递归回溯生成主干路径
+                    const reservedCells = new Set();
+                    // 生成时稍微多要求一点步数，以防被优化
+                    // 传入 difficulty 参数以调整生成策略
+                    if (this.generatePathRecursively(0, minSteps + 2, reservedCells, difficulty)) {
+                        // 关键验证：检查生成的骨架是否存在捷径
+                        const actualPath = this.solveGameBFS(this.board, this.playerPos);
+                        const actualSteps = actualPath ? actualPath.length - 1 : 0;
+                        
+                        if (actualPath && actualSteps >= minSteps) {
+                            success = true;
+                            break;
+                        }
+                        
+                        // 记录最佳结果作为备选
+                        if (actualPath && actualSteps > maxFoundSteps) {
+                            maxFoundSteps = actualSteps;
+                            bestLevel = {
+                                board: this.board.map(row => [...row]),
+                                boardColors: this.boardColors.map(row => [...row]),
+                                playerPos: [...this.playerPos]
+                            };
+                        }
+                    }
+                }
+                
+                if (!success) {
+                    if (bestLevel && maxFoundSteps >= Math.max(5, minSteps * 0.6)) {
+                        // 如果有尚可的备选方案（至少达到目标60%），则使用它
+                        this.board = bestLevel.board;
+                        this.boardColors = bestLevel.boardColors;
+                        this.playerPos = bestLevel.playerPos;
+                        this.createAxialMapping();
+                        console.log(`未达到目标步数 ${minSteps}，降级使用 ${maxFoundSteps} 步的关卡`);
+                    } else {
+                        alert(`生成关卡失败（无法满足步数要求，最高 ${maxFoundSteps} 步），请重试`);
+                        return;
+                    }
+                }
+                
+                // 4. 计算保留区域（确保主路径不被堵塞）
+                // 获取当前解法路径
+                const solutionPath = this.solveGameBFS(this.board, this.playerPos);
+                const reservedSet = this.getReservedCellsFromPath(solutionPath);
+                
+                // 5. 增加干扰项（提升分支系数）
+                // 这里的策略是：添加障碍物，然后检查分支系数，直到达标
+                this.addDecoysSmartly(targetBranching, reservedSet, minSteps, solutionPath);
+                
+                // 6. 保存关卡
+                this.currentLevel = {
+                    obstacles: [],
+                    player: this.playerPos
+                };
+                
+                for(let r=0; r<BOARD_ROWS; r++) {
+                    for(let c=0; c<BOARD_COLS; c++) {
+                        if(this.board[r][c] === OBSTACLE) {
+                            this.currentLevel.obstacles.push([r, c, this.boardColors[r][c]]);
+                        }
+                    }
+                }
+                
+                // 重置游戏
+                this.history = [];
+                this.moveCount = 0;
+                this.remainingPieces = this.currentLevel.obstacles.length;
+                this.gameWon = false;
+                this.selected = null;
+                this.hintPath = null;
+                this.saveState();
+                this.updateUI();
+                this.draw();
+                
+                // 显示提示
+                const victoryMsg = document.getElementById('victoryMessage');
+                victoryMsg.style.display = 'block';
+                const finalSol = this.solveGameBFS(this.board, this.playerPos);
+                // 此时不需要重新计算分支系数，直接估算或者再算一次
+                const avgBranching = this.calculateAvgBranchingFactor(finalSol);
+                victoryMsg.innerHTML = `生成成功！<br>最短步数: ${finalSol ? finalSol.length-1 : '?'} <br>平均分支: ${avgBranching.toFixed(1)}`;
+                setTimeout(() => {
+                    victoryMsg.style.display = 'none';
+                }, 3000);
+            }
+
+            // 从路径中提取所有保留格子（起点、终点、中间被吃掉的子、路径经过的空格）
+            getReservedCellsFromPath(path) {
+                const reserved = new Set();
+                if (!path) return reserved;
+                
+                // 添加起始点
+                reserved.add(`${path[0][0]},${path[0][1]}`);
+                
+                for (let i = 0; i < path.length - 1; i++) {
+                    const [r1, c1] = path[i];
+                    const [r2, c2] = path[i+1];
+                    
+                    // 目标点
+                    reserved.add(`${r2},${c2}`);
+                    
+                    // 计算中间点和路径点
+                    const jumpInfo = this.analyzeJump(r1, c1, r2, c2);
+                    if (jumpInfo) {
+                        const { mid, pathCells } = jumpInfo;
+                        reserved.add(`${mid[0]},${mid[1]}`);
+                        pathCells.forEach(([pr, pc]) => reserved.add(`${pr},${pc}`));
+                    }
+                }
+                return reserved;
+            }
+            
+            analyzeJump(r1, c1, r2, c2) {
+                const startKey = `${r1},${c1}`;
+                const targetKey = `${r2},${c2}`;
+                if (!this.indexToAxial.has(startKey) || !this.indexToAxial.has(targetKey)) return null;
+                
+                const [q1, aq1] = this.indexToAxial.get(startKey);
+                const [q2, aq2] = this.indexToAxial.get(targetKey);
+                
+                const dq = q2 - q1;
+                const dr = aq2 - aq1;
+                
+                // 寻找最大公约数或直接判断倍数
+                // 简单处理：遍历方向
+                for(const [dirQ, dirR] of AXIAL_DIRS) {
+                     // 检查是否是该方向
+                     // dq = k * dirQ, dr = k * dirR
+                     let k = 0;
+                     if (dirQ !== 0) k = dq / dirQ;
+                     else if (dirR !== 0) k = dr / dirR;
+                     
+                     if (k > 0 && Math.round(k * dirQ) === dq && Math.round(k * dirR) === dr) {
+                         // 找到了方向和倍数 k (factor)
+                         const midK = k / 2;
+                         const midQ = q1 + midK * dirQ;
+                         const midR = aq1 + midK * dirR;
+                         
+                         const pathCells = [];
+                         for(let i=1; i<k; i++) {
+                             if(i === midK) continue;
+                             const pq = q1 + i * dirQ;
+                             const pr = aq1 + i * dirR;
+                             if(this.axialToIndex.has(`${pq},${pr}`)) {
+                                 pathCells.push(this.axialToIndex.get(`${pq},${pr}`));
+                             }
+                         }
+                         
+                         if(this.axialToIndex.has(`${midQ},${midR}`)) {
+                             return {
+                                 mid: this.axialToIndex.get(`${midQ},${midR}`),
+                                 pathCells: pathCells
+                             };
+                         }
+                     }
+                }
+                return null;
+            }
+            
+            addDecoysSmartly(targetBranching, reservedSet, minSteps, initialPath) {
+                let currentBranching = this.calculateAvgBranchingFactor(initialPath);
+                
+                // 1. 获取候选点（路径周围的点）
+                let candidates = this.getDecoyCandidates(initialPath, reservedSet);
+                
+                // 2. 随机打乱
+                for (let i = candidates.length - 1; i > 0; i--) {
+                    const j = Math.floor(Math.random() * (i + 1));
+                    [candidates[i], candidates[j]] = [candidates[j], candidates[i]];
+                }
+                
+                // 3. 尽力而为：遍历候选点尝试放置
+                // 用户指示：“能加就加，不能加就算了”
+                // 不再强求达到 targetBranching，而是遍历一遍候选集，能放的都放上去
+                let addedCount = 0;
+                const maxDecoys = 20; // 限制最大添加数量，防止棋盘太乱
+                
+                for (const [r, c] of candidates) {
+                    if (addedCount >= maxDecoys) break;
+                    
+                    // 试着放置
+                    this.board[r][c] = OBSTACLE;
+                    this.createAxialMapping(); 
+                    
+                    // A. 捷径检查（必须保留，否则高难度会变简单）
+                    const newPath = this.solveGameBFS(this.board, this.playerPos);
+                    if (!newPath || (newPath.length - 1) < minSteps) {
+                        // 产生捷径或无解 -> 撤销
+                        this.board[r][c] = EMPTY;
+                        continue;
+                    }
+
+                    // B. 分支系数检查
+                    const newBranching = this.calculateAvgBranchingFactor(newPath);
+                    
+                    // 只要分支系数不降低太多，或者有提升，就保留
+                    // 放宽标准：只要是合法干扰项，就倾向于保留
+                    if (newBranching >= currentBranching - 0.1) {
+                        this.assignRandomColor(r, c);
+                        currentBranching = newBranching;
+                        addedCount++;
+                    } else {
+                        // 如果严重降低了分支系数（说明堵住了很多路），则撤销
+                        this.board[r][c] = EMPTY;
+                    }
+                }
+            }
+            
+            getDecoyCandidates(path, reservedSet) {
+                const candidates = [];
+                const visited = new Set();
+                
+                // 遍历路径上的每个点
+                for (const [pr, pc] of path) {
+                     const pKey = `${pr},${pc}`;
+                     if (!this.indexToAxial.has(pKey)) continue;
+                     const [q, r_ax] = this.indexToAxial.get(pKey);
+                     
+                     // 检查6个方向
+                     for (const [dq, dr] of AXIAL_DIRS) {
+                         // 检查距离 1-4 (覆盖所有可能跳跃的中间点位置)
+                         for (let dist = 1; dist <= 4; dist++) { 
+                             const tq = q + dq * dist;
+                             const tr = r_ax + dr * dist;
+                             const key = `${tq},${tr}`;
+                             
+                             if (this.axialToIndex.has(key)) {
+                                 const [cr, cc] = this.axialToIndex.get(key);
+                                 const cKey = `${cr},${cc}`;
+                                 
+                                 // 候选点必须是：未访问过、不是保留点、当前是空位
+                                 if (!visited.has(cKey) && !reservedSet.has(cKey) && this.board[cr][cc] === EMPTY) {
+                                     visited.add(cKey);
+                                     candidates.push([cr, cc]);
+                                 }
+                             }
+                         }
+                     }
+                }
+                return candidates;
+            }
+            
+            calculateAvgBranchingFactor(path) {
+                // 如果未提供 path，则自己计算（兼容旧调用）
+                if (!path) {
+                    path = this.solveGameBFS(this.board, this.playerPos);
+                }
+                if (!path) return 0;
+                
+                let totalBranches = 0;
+                let steps = 0;
+                
+                // 保存当前真实状态
+                const savedBoard = this.board.map(row => [...row]);
+                const savedPlayer = this.playerPos ? [...this.playerPos] : null;
+                const savedColors = this.boardColors.map(row => [...row]);
+                const savedRem = this.remainingPieces;
+                
+                try {
+                    // path: [start, p1, p2, ...]
+                    // 遍历路径上的每一步
+                    for (let i = 0; i < path.length - 1; i++) {
+                        const currentPos = path[i];
+                        const nextPos = path[i+1];
+                        
+                        // 确保玩家在 currentPos (虽然逻辑上应该已经在，但为了保险)
+                        this.board[currentPos[0]][currentPos[1]] = PLAYER;
+                        this.playerPos = currentPos;
+                        this.createAxialMapping();
+                        
+                        // 计算当前位置的所有可能跳跃数
+                        const jumps = this.findAllJumpsFrom(currentPos[0], currentPos[1]);
+                        totalBranches += jumps.length;
+                        steps++;
+                        
+                        // 手动执行跳跃 (不触发UI更新和音效)
+                        const jumpInfo = this.analyzeJump(currentPos[0], currentPos[1], nextPos[0], nextPos[1]);
+                        if (jumpInfo) {
+                            // 清除起点
+                            this.board[currentPos[0]][currentPos[1]] = EMPTY;
+                            // 清除中间
+                            const [mr, mc] = jumpInfo.mid;
+                            this.board[mr][mc] = EMPTY;
+                            this.boardColors[mr][mc] = null;
+                            // 设置终点
+                            this.board[nextPos[0]][nextPos[1]] = PLAYER;
+                            this.playerPos = nextPos;
+                        }
+                    }
+                } catch (e) {
+                    console.error("Branching calculation error", e);
+                } finally {
+                    // 恢复状态
+                    this.board = savedBoard;
+                    this.boardColors = savedColors;
+                    this.playerPos = savedPlayer;
+                    this.remainingPieces = savedRem;
+                    this.createAxialMapping();
+                }
+                
+                return steps > 0 ? totalBranches / steps : 0;
+            }
+
+            // 递归生成路径（回溯法）
+            generatePathRecursively(currentSteps, minSteps, reservedCells, difficulty) {
+                // 1. 终止条件：在底部 且 步数达标
+                const inBottomTriangle = this.playerPos[0] >= 13;
+                if (inBottomTriangle && currentSteps >= minSteps) {
+                    return true;
+                }
+                
+                // 2. 剪枝：如果已经太深但还没到底，或者步数过多
+                if (currentSteps > minSteps + 15) return false;
+                
+                // 3. 获取所有可能的反向跳跃
+                // 传入 difficulty，允许在高难度下放宽检查，增加可能的跳跃
+                const possibleJumps = this.getAllReverseJumps(this.playerPos[0], this.playerPos[1], reservedCells);
+                
+                // 如果没有跳跃点，且还没到达底部，尝试稍微回退？
+                // 这里不做复杂处理，直接返回false触发回溯
+                if (possibleJumps.length === 0) return false;
+                
+                // 4. 启发式排序 - 核心优化：横向扫描 + 盘旋
+                const progress = currentSteps / minSteps;
+                
+                possibleJumps.sort((a, b) => {
+                    const [rA, cA, mA, cmA, factorA] = a;
+                    const [rB, cB, mB, cmB, factorB] = b;
+                    
+                    // A. 强制约束：前期严禁直接跳进底部三角区 (保持原样)
+                    const inBottomA = rA >= 13;
+                    const inBottomB = rB >= 13;
+                    if (progress < 0.8) {
+                        if (inBottomA !== inBottomB) return inBottomA ? 1 : -1;
+                    }
+
+                    // B. 阶段性策略
+                    if (progress < 0.75) {
+                        // 【前期策略】：最大化利用棋盘宽度 (横向移动)
+                        
+                        // 1. 优先横向移动 (Row变化小)
+                        // 这是增加步数的关键，像贪吃蛇一样扫荡
+                        const diffRowA = Math.abs(rA - this.playerPos[0]);
+                        const diffRowB = Math.abs(rB - this.playerPos[0]);
+                        if (diffRowA !== diffRowB) {
+                            // 优先选择行变化小的 (横向)
+                            // 给予巨大权重
+                            return (diffRowA - diffRowB) * 5;
+                        }
+                        
+                        // 2. 保持在中间区域 (Rows 4-12)
+                        // 避免过早去底部，也避免一直卡在顶部
+                        const distMidA = Math.abs(rA - 8);
+                        const distMidB = Math.abs(rB - 8);
+                        
+                        // 3. 优先长距离
+                        const scoreFactorA = factorA * 3;
+                        const scoreFactorB = factorB * 3;
+                        
+                        // 4. 随机因子 (高难度下非常重要)
+                        const random = Math.random() * 8;
+                        
+                        // 综合打分
+                        // 距离中间越近越好 (distMid越小越好)
+                        const scoreA = scoreFactorA - distMidA + random;
+                        const scoreB = scoreFactorB - distMidB;
+                        
+                        return scoreB - scoreA;
+                        
+                    } else {
+                        // 【后期策略】：冲刺
+                        if (inBottomA !== inBottomB) return inBottomA ? -1 : 1;
+                        return rB - rA; // 越靠下越好
+                    }
+                });
+                
+                // 5. 尝试跳跃
+                // 保持较低的分支搜索上限，保证生成速度
+                const maxBranch = difficulty === 'medium' ? 5 : 8;
+                
+                // 只尝试前N个最好的候选项
+                // 稍微随机化一下顺序，避免每次都走完全一样的路径
+                const topMoves = possibleJumps.slice(0, maxBranch);
+                if (Math.random() > 0.3 && topMoves.length > 1) {
+                    // 简单的随机交换，增加变化
+                    const idx1 = Math.floor(Math.random() * topMoves.length);
+                    const idx2 = Math.floor(Math.random() * topMoves.length);
+                    [topMoves[idx1], topMoves[idx2]] = [topMoves[idx2], topMoves[idx1]];
+                }
+                
+                for (const move of topMoves) {
+                    const [jumpToR, jumpToC, midR, midC, factor] = move;
+                    
+                    // 记录状态用于回溯
+                    const prevPlayerPos = [...this.playerPos];
+                    const addedReserved = [];
+                    
+                    // 执行反向跳跃
+                    // 原位置(当前Player)变空
+                    this.board[prevPlayerPos[0]][prevPlayerPos[1]] = EMPTY;
+                    // 中间变障碍
+                    this.board[midR][midC] = OBSTACLE;
+                    this.assignRandomColor(midR, midC);
+                    // 目标位置变Player
+                    this.board[jumpToR][jumpToC] = PLAYER;
+                    this.playerPos = [jumpToR, jumpToC];
+                    
+                    // 更新reservedCells
+                    // 保护：原位置(正向跳跃落点)
+                    const originKey = `${prevPlayerPos[0]},${prevPlayerPos[1]}`;
+                    if (!reservedCells.has(originKey)) {
+                        reservedCells.add(originKey);
+                        addedReserved.push(originKey);
+                    }
+                    
+                    // 保护：路径上的空位
+                    const [q1, r1] = this.indexToAxial.get(`${prevPlayerPos[0]},${prevPlayerPos[1]}`);
+                    const [q2, r2] = this.indexToAxial.get(`${jumpToR},${jumpToC}`);
+                    const dq = (q2 - q1) / factor;
+                    const dr = (r2 - r1) / factor;
+                    for (let i = 1; i < factor; i++) {
+                        if (i === factor/2) continue;
+                        const pathQ = q1 + dq * i;
+                        const pathR = r1 + dr * i;
+                        const pathKey = `${pathQ},${pathR}`;
+                        if (this.axialToIndex.has(pathKey)) {
+                            const [pR, pC] = this.axialToIndex.get(pathKey);
+                            const pKey = `${pR},${pC}`;
+                            if (!reservedCells.has(pKey)) {
+                                reservedCells.add(pKey);
+                                addedReserved.push(pKey);
+                            }
+                        }
+                    }
+                    
+                    // 递归下一层
+                    if (this.generatePathRecursively(currentSteps + 1, minSteps, reservedCells)) {
+                        return true;
+                    }
+                    
+                    // 回溯（撤销操作）
+                    this.playerPos = prevPlayerPos;
+                    this.board[jumpToR][jumpToC] = EMPTY;
+                    this.board[midR][midC] = EMPTY;
+                    this.boardColors[midR][midC] = null;
+                    this.board[prevPlayerPos[0]][prevPlayerPos[1]] = PLAYER;
+                    
+                    // 撤销reserved
+                    addedReserved.forEach(key => reservedCells.delete(key));
+                }
+                
+                return false;
+            }
+            
+            assignRandomColor(r, c) {
+                const colorKeys = Object.keys(COLORS).filter(k => !['BG','EMPTY','PLAYER','SELECTED','HIGHLIGHT','WIN_AREA','WIN_AREA_BG','WIN_AREA_BORDER'].includes(k));
+                this.boardColors[r][c] = COLORS[colorKeys[Math.floor(Math.random() * colorKeys.length)]];
+            }
+            
+            // 广度优先搜索求解（寻找最短路径）
+            solveGameBFS(boardState, playerPos) {
+                // 初始状态
+                // 使用更安全的Hash格式：|r,c|r,c|
+                const startObsStr = this.getBoardObsHash(boardState);
+                const startHash = `${playerPos[0]},${playerPos[1]}${startObsStr}`;
+                
+                const queue = [{
+                    r: playerPos[0],
+                    c: playerPos[1],
+                    obsStr: startObsStr,
+                    path: [[playerPos[0], playerPos[1]]] // 包含起点
+                }];
+                
+                const visited = new Set();
+                visited.add(startHash);
+                
+                let iterations = 0;
+                const maxIterations = 30000; // 稍微增加搜索上限
+                
+                while (queue.length > 0) {
+                    iterations++;
+                    if (iterations > maxIterations) return null; 
+                    
+                    const current = queue.shift();
+                    
+                    // 检查胜利
+                    if (current.r <= 3) {
+                        return current.path;
+                    }
+                    
+                    // 还原当前障碍物集合
+                    // obsStr 格式 "|r,c|r,c|"
+                    // split('|') 会得到 ["", "r,c", "r,c", ""]
+                    const currentObstacles = new Set(current.obsStr.split('|').filter(s => s !== ''));
+                    
+                    const jumps = this.getDynamicJumpsFromSet(current.r, current.c, currentObstacles);
+                    
+                    for (const [tr, tc, mr, mc] of jumps) {
+                        const midKey = `${mr},${mc}`;
+                        if (!currentObstacles.has(midKey)) continue;
+                        
+                        // 安全的移除障碍物
+                        // 直接替换 |midKey| 为 |
+                        const newObsStr = current.obsStr.replace(`|${midKey}|`, '|');
+                        
+                        const nextHash = `${tr},${tc}${newObsStr}`;
+                        
+                        if (!visited.has(nextHash)) {
+                            visited.add(nextHash);
+                            queue.push({
+                                r: tr,
+                                c: tc,
+                                obsStr: newObsStr,
+                                path: [...current.path, [tr, tc]]
+                            });
+                        }
+                    }
+                }
+                
+                return null;
+            }
+            
+            getBoardObsHash(board) {
+                let obsStr = "|";
+                for(let i=0; i<BOARD_ROWS; i++) {
+                    for(let j=0; j<BOARD_COLS; j++) {
+                        if (board[i][j] === OBSTACLE) {
+                            obsStr += `${i},${j}|`;
+                        }
+                    }
+                }
+                return obsStr;
+            }
+
+            getDynamicJumpsFromSet(r, c, obstacleSet) {
+                const jumps = []; 
+                const startKey = `${r},${c}`;
+                if (!this.indexToAxial.has(startKey)) return [];
+                const [q1, r1] = this.indexToAxial.get(startKey);
+
+                for (const [dirQ, dirR] of AXIAL_DIRS) {
+                    for (const factor of [2, 4, 6, 8]) {
+                        const targetQ = q1 + dirQ * factor;
+                        const targetR = r1 + dirR * factor;
+                        const targetKey = `${targetQ},${targetR}`;
+                        const midQ = q1 + dirQ * (factor/2);
+                        const midR = r1 + dirR * (factor/2);
+                        const midKey = `${midQ},${midR}`;
+                        
+                        if (!this.axialToIndex.has(targetKey) || !this.axialToIndex.has(midKey)) continue;
+                        
+                        const [tr, tc] = this.axialToIndex.get(targetKey);
+                        const [mr, mc] = this.axialToIndex.get(midKey);
+                        
+                        // 1. 中间必须是障碍物
+                        if (!obstacleSet.has(`${mr},${mc}`)) continue;
+                        
+                        // 2. 目标必须是空位 (不在障碍物集合里，且不是 Invalid)
+                        // 注意：这里我们只知道障碍物在哪。
+                        // 我们还需要知道是否是 INVALID。axialToIndex.has 保证了有效性。
+                        // 还需要知道是否是 PLAYER？ Solver里 Player 就在 r,c。目标肯定不是 r,c。
+                        // 所以只要 target 不在 obstacleSet 里，就是空位 (因为只有一个 Player)
+                        if (obstacleSet.has(`${tr},${tc}`)) continue;
+                        
+                        // 3. 路径上其他位置必须为空
+                        let pathClear = true;
+                        for (let i = 1; i < factor; i++) {
+                            if (i === factor/2) continue; 
+                            const pathQ = q1 + dirQ * i;
+                            const pathR = r1 + dirR * i;
+                            const pathKey = `${pathQ},${pathR}`;
+                            
+                            if (!this.axialToIndex.has(pathKey)) {
+                                pathClear = false;
+                                break;
+                            }
+                            
+                            const [pR, pC] = this.axialToIndex.get(pathKey);
+                            // 检查是否是障碍物
+                            if (obstacleSet.has(`${pR},${pC}`)) {
+                                pathClear = false;
+                                break;
+                            }
+                        }
+                        
+                        if (pathClear) {
+                            jumps.push([tr, tc, mr, mc]);
+                        }
+                    }
+                }
+                return jumps;
+            }
+
+            getAllReverseJumps(r, c, reservedCells = new Set()) {
+                const jumps = [];
+                const startKey = `${r},${c}`;
+                if (!this.indexToAxial.has(startKey)) return [];
+                const [q1, r1] = this.indexToAxial.get(startKey);
+                
+                for (const [dq, dr] of AXIAL_DIRS) {
+                    for (const factor of [2, 4, 6, 8]) {
+                        // 反向目标位置
+                        const targetQ = q1 + dq * factor;
+                        const targetR = r1 + dr * factor;
+                        const targetKey = `${targetQ},${targetR}`;
+                        
+                        // 中间位置
+                        const midQ = q1 + dq * (factor/2);
+                        const midR = r1 + dr * (factor/2);
+                        const midKey = `${midQ},${midR}`;
+                        
+                        if (!this.axialToIndex.has(targetKey) || !this.axialToIndex.has(midKey)) continue;
+                        
+                        const [targetRIdx, targetCIdx] = this.axialToIndex.get(targetKey);
+                        const [midRIdx, midCIdx] = this.axialToIndex.get(midKey);
+                        
+                        // 检查Mid是否在reservedCells中
+                        if (reservedCells.has(`${midRIdx},${midCIdx}`)) continue;
+
+                        // In current state, Target and Mid must be EMPTY
+                        if (this.board[targetRIdx][targetCIdx] !== EMPTY || 
+                            this.board[midRIdx][midCIdx] !== EMPTY) continue;
+
+                        // Check entire path for emptiness
+                        let pathClear = true;
+                        for (let i = 1; i < factor; i++) {
+                            const pathQ = q1 + dq * i;
+                            const pathR = r1 + dr * i;
+                            const pathKey = `${pathQ},${pathR}`;
+                             if (!this.axialToIndex.has(pathKey)) {
+                                pathClear = false;
+                                break;
+                            }
+                            const [pR, pC] = this.axialToIndex.get(pathKey);
+                            if (this.board[pR][pC] !== EMPTY) {
+                                pathClear = false;
+                                break;
+                            }
+                        }
+                        
+                        if (pathClear) {
+                            jumps.push([targetRIdx, targetCIdx, midRIdx, midCIdx, factor]);
+                        }
+                    }
+                }
+                return jumps;
+            }
+            
+            exportLevel() {
+                if (!this.currentLevel) return JSON.stringify(null);
+                return btoa(JSON.stringify(this.currentLevel));
+            }
+            
+            importLevel(code) {
+                try {
+                    const data = JSON.parse(atob(code));
+                    if (data && data.obstacles && data.player) {
+                        this.currentLevel = data;
+                        this.restart();
+                        return true;
+                    }
+                } catch (e) {
+                    console.error(e);
+                }
+                return false;
+            }
+            
+            createAxialMapping() {
+                this.indexToAxial.clear();
+                this.axialToIndex.clear();
+                
+                for (let r = 0; r < BOARD_ROWS; r++) {
+                    for (let c = 0; c < BOARD_COLS; c++) {
+                        if (this.board[r][c] !== INVALID) {
+                            const q = c - Math.floor(r / 2);
+                            const axialR = r;
+                            this.indexToAxial.set(`${r},${c}`, [q, axialR]);
+                            this.axialToIndex.set(`${q},${axialR}`, [r, c]);
+                        }
+                    }
+                }
+            }
+            
+            isInside(r, c) {
+                return r >= 0 && r < BOARD_ROWS && c >= 0 && c < BOARD_COLS && this.board[r][c] !== INVALID;
+            }
+            
+            canJumpTo(startR, startC, targetR, targetC) {
+                if (!this.isInside(startR, startC) || !this.isInside(targetR, targetC)) {
+                    return {valid: false, obstaclePos: null};
+                }
+                
+                if (this.board[startR][startC] !== PLAYER) {
+                    return {valid: false, obstaclePos: null};
+                }
+                
+                if (this.board[targetR][targetC] !== EMPTY) {
+                    return {valid: false, obstaclePos: null};
+                }
+                
+                const startKey = `${startR},${startC}`;
+                const targetKey = `${targetR},${targetC}`;
+                
+                if (!this.indexToAxial.has(startKey) || !this.indexToAxial.has(targetKey)) {
+                    return {valid: false, obstaclePos: null};
+                }
+                
+                const [q1, r1] = this.indexToAxial.get(startKey);
+                const [q2, r2] = this.indexToAxial.get(targetKey);
+                
+                const dq = q2 - q1;
+                const dr = r2 - r1;
+                
+                // 检查是否是六方向的整数倍
+                let directionFound = false;
+                let dirQ = 0, dirR = 0;
+                let factor = 0;
+                
+                for (const [testDirQ, testDirR] of AXIAL_DIRS) {
+                    if (dq === 0 && testDirQ === 0) {
+                        if (dr !== 0 && dr % testDirR === 0) {
+                            factor = dr / testDirR;
+                            if (factor > 0) {
+                                directionFound = true;
+                                dirQ = testDirQ;
+                                dirR = testDirR;
+                                break;
+                            }
+                        }
+                    } else if (dr === 0 && testDirR === 0) {
+                        if (dq !== 0 && dq % testDirQ === 0) {
+                            factor = dq / testDirQ;
+                            if (factor > 0) {
+                                directionFound = true;
+                                dirQ = testDirQ;
+                                dirR = testDirR;
+                                break;
+                            }
+                        }
+                    } else if (dq !== 0 && dr !== 0) {
+                        if (dq * testDirR === dr * testDirQ) {
+                            if (testDirQ !== 0 && dq % testDirQ === 0) {
+                                const testFactor = dq / testDirQ;
+                                if (testFactor > 0 && dr === testDirR * testFactor) {
+                                    directionFound = true;
+                                    dirQ = testDirQ;
+                                    dirR = testDirR;
+                                    factor = testFactor;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                if (!directionFound) {
+                    return {valid: false, obstaclePos: null};
+                }
+                
+                if (factor % 2 !== 0 || factor < 2) {
+                    return {valid: false, obstaclePos: null};
+                }
+                
+                // 障碍物应该在中间位置
+                const obstacleFactor = factor / 2;
+                const obstacleQ = q1 + dirQ * obstacleFactor;
+                const obstacleR = r1 + dirR * obstacleFactor;
+                const obstacleKey = `${obstacleQ},${obstacleR}`;
+                
+                if (!this.axialToIndex.has(obstacleKey)) {
+                    return {valid: false, obstaclePos: null};
+                }
+                
+                const [obstacleRIdx, obstacleCIdx] = this.axialToIndex.get(obstacleKey);
+                
+                if (this.board[obstacleRIdx][obstacleCIdx] !== OBSTACLE) {
+                    return {valid: false, obstaclePos: null};
+                }
+                
+                // 检查路径是否畅通
+                for (let i = 1; i < factor; i++) {
+                    if (i === obstacleFactor) continue;
+                    
+                    const pathQ = q1 + dirQ * i;
+                    const pathR = r1 + dirR * i;
+                    const pathKey = `${pathQ},${pathR}`;
+                    
+                    if (!this.axialToIndex.has(pathKey)) {
+                        return {valid: false, obstaclePos: null};
+                    }
+                    
+                    const [pathRIdx, pathCIdx] = this.axialToIndex.get(pathKey);
+                    
+                    if (this.board[pathRIdx][pathCIdx] !== EMPTY) {
+                        return {valid: false, obstaclePos: null};
+                    }
+                }
+                
+                return {valid: true, obstaclePos: [obstacleRIdx, obstacleCIdx]};
+            }
+            
+            findAllJumpsFrom(startR, startC) {
+                if (!this.isInside(startR, startC) || this.board[startR][startC] !== PLAYER) {
+                    return [];
+                }
+                
+                const possibleJumps = [];
+                
+                // 检查所有方向和距离
+                for (const [dirQ, dirR] of AXIAL_DIRS) {
+                    for (const factor of [2, 4, 6, 8]) {
+                        const startKey = `${startR},${startC}`;
+                        const [q1, r1] = this.indexToAxial.get(startKey);
+                        const targetQ = q1 + dirQ * factor;
+                        const targetR = r1 + dirR * factor;
+                        const targetKey = `${targetQ},${targetR}`;
+                        
+                        if (!this.axialToIndex.has(targetKey)) continue;
+                        
+                        const [targetRIdx, targetCIdx] = this.axialToIndex.get(targetKey);
+                        
+                        const {valid} = this.canJumpTo(startR, startC, targetRIdx, targetCIdx);
+                        if (valid) {
+                            possibleJumps.push([targetRIdx, targetCIdx]);
+                        }
+                    }
+                }
+                
+                return possibleJumps;
+            }
+            
+            makeJump(fr, fc, tr, tc) {
+                const {valid, obstaclePos} = this.canJumpTo(fr, fc, tr, tc);
+                if (!valid || !obstaclePos) {
+                    return false;
+                }
+                
+                const [or_, oc] = obstaclePos;
+                
+                // 保存当前状态
+                this.saveState();
+                
+                // 起点清空
+                this.board[fr][fc] = EMPTY;
+                
+                // 中间障碍物被吃掉
+                this.board[or_][oc] = EMPTY;
+                this.boardColors[or_][oc] = null;
+                this.remainingPieces--;
+                
+                // 终点变成玩家
+                this.board[tr][tc] = PLAYER;
+                this.playerPos = [tr, tc];
+                
+                // 增加步数
+                this.moveCount++;
+                
+                // 重新创建坐标映射
+                this.createAxialMapping();
+                
+                // 播放吃子音效
+                this.playCaptureSound();
+                
+                // 检查胜利
+                if (this.checkWin()) {
+                    this.playVictorySound();
+                    return true;
+                }
+                
+                return true;
+            }
+            
+            checkWin() {
+                if (!this.playerPos) return false;
+                
+                const [r, c] = this.playerPos;
+                // 前4行（矩阵行0-3）是胜利区域
+                if (r <= 3 && this.board[r][c] === PLAYER) {
+                    this.gameWon = true;
+                    const victoryMsg = document.getElementById('victoryMessage');
+                    victoryMsg.textContent = '🎉 胜利！棋子已到达顶部！';
+                    victoryMsg.style.display = 'block';
+                    return true;
+                }
+                
+                this.gameWon = false;
+                return false;
+            }
+            
+            saveState() {
+                const state = {
+                    board: this.board.map(row => [...row]),
+                    boardColors: this.boardColors.map(row => [...row]),
+                    playerPos: this.playerPos ? [...this.playerPos] : null,
+                    moveCount: this.moveCount,
+                    remainingPieces: this.remainingPieces
+                };
+                this.history.push(state);
+                
+                // 限制历史记录长度
+                if (this.history.length > 20) {
+                    this.history.shift();
+                }
+            }
+            
+            undo() {
+                if (this.history.length > 1) {
+                    this.history.pop(); // 移除当前状态
+                    
+                    // 恢复到上一个状态
+                    const prevState = this.history[this.history.length - 1];
+                    
+                    this.board = prevState.board.map(row => [...row]);
+                    this.boardColors = prevState.boardColors.map(row => [...row]);
+                    this.playerPos = prevState.playerPos ? [...prevState.playerPos] : null;
+                    this.moveCount = prevState.moveCount;
+                    this.remainingPieces = prevState.remainingPieces;
+                    this.selected = null;
+                    this.hintPath = null;
+                    
+                    // 重新创建坐标映射
+                    this.createAxialMapping();
+                    
+                    // 隐藏胜利消息
+                    document.getElementById('victoryMessage').style.display = 'none';
+                    this.gameWon = false;
+                    
+                    this.updateUI();
+                    return true;
+                }
+                return false;
+            }
+            
+            restart() {
+                // 清空历史记录
+                this.history = [];
+                
+                // 重置游戏状态
+                this.board = this.createEmptyBoard();
+                this.boardColors = this.createEmptyColorLayer();
+                this.setupBoard();
+                this.createAxialMapping();
+                this.moveCount = 0;
+                this.remainingPieces = 28;
+                this.gameWon = false;
+                this.selected = null;
+                this.hintPath = null;
+                
+                // 保存初始状态
+                this.saveState();
+                
+                // 隐藏胜利消息
+                document.getElementById('victoryMessage').style.display = 'none';
+                
+                // 更新UI和绘制
+                this.updateUI();
+                this.draw();
+            }
+            
+            getPixelPos(row, col) {
+                const CELL_SIZE = 40;
+                const X_OFFSET = this.canvas.width / 2;
+                const Y_OFFSET = 120;
+                
+                const x = X_OFFSET + (col - BOARD_COLS / 2) * CELL_SIZE + (row % 2) * (CELL_SIZE / 2);
+                const y = Y_OFFSET + row * (CELL_SIZE * 0.85);
+                return [x, y];
+            }
+            
+            getBoardPos(px, py) {
+                for (let r = 0; r < BOARD_ROWS; r++) {
+                    for (let c = 0; c < BOARD_COLS; c++) {
+                        if (this.board[r][c] === INVALID) continue;
+                        
+                        const [x, y] = this.getPixelPos(r, c);
+                        const distance = Math.sqrt(Math.pow(px - x, 2) + Math.pow(py - y, 2));
+                        
+                        if (distance < 20) {
+                            return [r, c];
+                        }
+                    }
+                }
+                return null;
+            }
+            
+            draw() {
+                this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+                
+                // 绘制胜利区域背景（前4行）
+                for (let r = 0; r < Math.min(4, BOARD_ROWS); r++) {
+                    for (let c = 0; c < BOARD_COLS; c++) {
+                        if (this.board[r][c] !== INVALID) {
+                            const [x, y] = this.getPixelPos(r, c);
+                            
+                            // 创建径向渐变
+                            const gradient = this.ctx.createRadialGradient(x, y, 5, x, y, 25);
+                            gradient.addColorStop(0, 'rgba(144, 238, 144, 0.6)');
+                            gradient.addColorStop(1, 'rgba(144, 238, 144, 0.1)');
+                            
+                            this.ctx.beginPath();
+                            this.ctx.fillStyle = gradient;
+                            this.ctx.arc(x, y, 23, 0, Math.PI * 2);
+                            this.ctx.fill();
+                        }
+                    }
+                }
+                
+                // 绘制棋盘和棋子
+                for (let r = 0; r < BOARD_ROWS; r++) {
+                    for (let c = 0; c < BOARD_COLS; c++) {
+                        if (this.board[r][c] === INVALID) continue;
+                        
+                        const [x, y] = this.getPixelPos(r, c);
+                        let color;
+                        
+                        if (this.board[r][c] === EMPTY) {
+                            color = COLORS.EMPTY;
+                        } else if (this.board[r][c] === OBSTACLE) {
+                            color = this.boardColors[r][c] || '#aaaaaa';
+                        } else if (this.board[r][c] === PLAYER) {
+                            color = COLORS.PLAYER;
+                        } else {
+                            color = COLORS.EMPTY;
+                        }
+                        
+                        // 选中棋子高亮边框
+                        if (this.selected && this.selected[0] === r && this.selected[1] === c) {
+                            this.ctx.beginPath();
+                            this.ctx.fillStyle = COLORS.SELECTED;
+                            this.ctx.arc(x, y, 20, 0, Math.PI * 2);
+                            this.ctx.fill();
+                        }
+                        
+                        // 绘制棋子
+                        this.ctx.beginPath();
+                        this.ctx.fillStyle = color;
+                        this.ctx.arc(x, y, 17, 0, Math.PI * 2);
+                        this.ctx.fill();
+                        
+                        // 添加棋子边框
+                        this.ctx.beginPath();
+                        this.ctx.strokeStyle = 'rgba(0, 0, 0, 0.2)';
+                        this.ctx.lineWidth = 1;
+                        this.ctx.arc(x, y, 17, 0, Math.PI * 2);
+                        this.ctx.stroke();
+                        
+                        // 在玩家棋子上画一个白点
+                        if (this.board[r][c] === PLAYER) {
+                            this.ctx.beginPath();
+                            this.ctx.fillStyle = '#ffffff';
+                            this.ctx.arc(x, y, 6, 0, Math.PI * 2);
+                            this.ctx.fill();
+                        }
+                    }
+                }
+                
+                // 显示可跳目标（全部显示为绿色）
+                if (this.selected) {
+                    const [fr, fc] = this.selected;
+                    if (this.board[fr][fc] === PLAYER) {
+                        const possibleJumps = this.findAllJumpsFrom(fr, fc);
+                        for (const [tr, tc] of possibleJumps) {
+                            const [hx, hy] = this.getPixelPos(tr, tc);
+                            
+                            this.ctx.beginPath();
+                            this.ctx.fillStyle = COLORS.HIGHLIGHT;
+                            this.ctx.arc(hx, hy, 12, 0, Math.PI * 2);
+                            this.ctx.fill();
+                            
+                            // 添加边框
+                            this.ctx.beginPath();
+                            this.ctx.strokeStyle = '#00A844';
+                            this.ctx.lineWidth = 2;
+                            this.ctx.arc(hx, hy, 12, 0, Math.PI * 2);
+                            this.ctx.stroke();
+                        }
+                    }
+                }
+                
+                // 绘制提示路径
+                if (this.hintPath && this.hintPath.length > 1) {
+                    this.ctx.save();
+                    
+                    // 1. 绘制连线
+                    this.ctx.strokeStyle = '#FF4081'; 
+                    this.ctx.lineWidth = 3;
+                    this.ctx.lineCap = 'round';
+                    this.ctx.lineJoin = 'round';
+                    this.ctx.setLineDash([5, 5]); 
+
+                    this.ctx.beginPath();
+                    for (let i = 0; i < this.hintPath.length; i++) {
+                        const [r, c] = this.hintPath[i];
+                        const [x, y] = this.getPixelPos(r, c);
+                        
+                        if (i === 0) {
+                            this.ctx.moveTo(x, y);
+                        } else {
+                            this.ctx.lineTo(x, y);
+                        }
+                    }
+                    this.ctx.stroke();
+                    
+                    // 2. 绘制节点和数字
+                    this.ctx.setLineDash([]); // 实线
+                    for (let i = 0; i < this.hintPath.length; i++) {
+                        const [r, c] = this.hintPath[i];
+                        const [x, y] = this.getPixelPos(r, c);
+                        
+                        // 绘制圆圈背景
+                        this.ctx.beginPath();
+                        this.ctx.arc(x, y, 10, 0, Math.PI * 2);
+                        this.ctx.fillStyle = '#FF4081';
+                        this.ctx.fill();
+                        this.ctx.strokeStyle = 'white';
+                        this.ctx.lineWidth = 2;
+                        this.ctx.stroke();
+                        
+                        // 绘制数字
+                        this.ctx.fillStyle = 'white';
+                        this.ctx.font = 'bold 12px Arial';
+                        this.ctx.textAlign = 'center';
+                        this.ctx.textBaseline = 'middle';
+                        
+                        // S是起点，数字是步数
+                        // hintPath[0]是当前位置(Start)
+                        // hintPath[1]是第1步跳到的位置
+                        this.ctx.fillText(i === 0 ? 'S' : i, x, y);
+                    }
+                    
+                    this.ctx.restore();
+                }
+            }
+            
+            findSolutionPath() {
+                if (!this.playerPos) return null;
+                const startPos = this.playerPos;
+                const queue = [[startPos[0], startPos[1]]];
+                const visited = new Set();
+                const startKey = `${startPos[0]},${startPos[1]}`;
+                visited.add(startKey);
+                const parent = new Map(); // key -> prevKey
+                
+                let foundGoalKey = null;
+
+                while (queue.length > 0) {
+                    const [r, c] = queue.shift();
+                    
+                    if (r <= 3) {
+                        foundGoalKey = `${r},${c}`;
+                        break;
+                    }
+                    
+                    const jumps = this.getStaticJumpsFrom(r, c);
+                    for (const [nr, nc] of jumps) {
+                        const key = `${nr},${nc}`;
+                        if (!visited.has(key)) {
+                            visited.add(key);
+                            parent.set(key, `${r},${c}`);
+                            queue.push([nr, nc]);
+                        }
+                    }
+                }
+                
+                if (foundGoalKey) {
+                    // Reconstruct
+                    const path = [];
+                    let curr = foundGoalKey;
+                    while (curr !== startKey) {
+                        const [r, c] = curr.split(',').map(Number);
+                        path.unshift([r, c]);
+                        curr = parent.get(curr);
+                    }
+                    // Add start
+                    path.unshift(startPos);
+                    return path;
+                }
+                return null;
+            }
+            
+            drawStar(ctx, cx, cy, spikes, outerRadius, innerRadius) {
+                let rot = Math.PI / 2 * 3;
+                let x = cx;
+                let y = cy;
+                const step = Math.PI / spikes;
+
+                ctx.beginPath();
+                ctx.moveTo(cx, cy - outerRadius);
+                
+                for (let i = 0; i < spikes; i++) {
+                    x = cx + Math.cos(rot) * outerRadius;
+                    y = cy + Math.sin(rot) * outerRadius;
+                    ctx.lineTo(x, y);
+                    rot += step;
+
+                    x = cx + Math.cos(rot) * innerRadius;
+                    y = cy + Math.sin(rot) * innerRadius;
+                    ctx.lineTo(x, y);
+                    rot += step;
+                }
+                
+                ctx.lineTo(cx, cy - outerRadius);
+                ctx.closePath();
+            }
+            
+            playCaptureSound() {
+                // 创建简单的吃子音效
+                try {
+                    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                    const oscillator = audioContext.createOscillator();
+                    const gainNode = audioContext.createGain();
+                    
+                    oscillator.connect(gainNode);
+                    gainNode.connect(audioContext.destination);
+                    
+                    oscillator.frequency.value = 400;
+                    oscillator.type = 'sine';
+                    
+                    gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+                    gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.2);
+                    
+                    oscillator.start(audioContext.currentTime);
+                    oscillator.stop(audioContext.currentTime + 0.2);
+                } catch (e) {
+                    console.log("音频上下文不可用");
+                }
+            }
+            
+            playVictorySound() {
+                // 创建简单的胜利音效
+                try {
+                    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                    
+                    // 播放一个胜利和弦
+                    for (let i = 0; i < 3; i++) {
+                        setTimeout(() => {
+                            const oscillator = audioContext.createOscillator();
+                            const gainNode = audioContext.createGain();
+                            
+                            oscillator.connect(gainNode);
+                            gainNode.connect(audioContext.destination);
+                            
+                            const notes = [523.25, 659.25, 783.99]; // C5, E5, G5
+                            oscillator.frequency.value = notes[i];
+                            oscillator.type = 'sine';
+                            
+                            gainNode.gain.setValueAtTime(0.2, audioContext.currentTime);
+                            gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.5);
+                            
+                            oscillator.start(audioContext.currentTime);
+                            oscillator.stop(audioContext.currentTime + 0.5);
+                        }, i * 150);
+                    }
+                } catch (e) {
+                    console.log("音频上下文不可用");
+                }
+            }
+            
+            updateUI() {
+                document.getElementById('moveCount').textContent = this.moveCount;
+                document.getElementById('remainingPieces').textContent = this.remainingPieces;
+            }
+            
+            setupEventListeners() {
+                // 鼠标点击事件
+                this.canvas.addEventListener('click', (e) => {
+                    if (this.gameWon) return;
+                    
+                    // 只要点击，就清除提示
+                    if (this.hintPath) {
+                        this.hintPath = null;
+                        this.draw();
+                    }
+                    
+                    const rect = this.canvas.getBoundingClientRect();
+                    const scaleX = this.canvas.width / rect.width;
+                    const scaleY = this.canvas.height / rect.height;
+                    const x = (e.clientX - rect.left) * scaleX;
+                    const y = (e.clientY - rect.top) * scaleY;
+                    
+                    const cell = this.getBoardPos(x, y);
+                    if (!cell) {
+                        this.selected = null;
+                        this.draw();
+                        return;
+                    }
+                    
+                    const [r, c] = cell;
+                    
+                    // 第一次点击：只能选玩家棋子
+                    if (this.selected === null) {
+                        if (this.board[r][c] === PLAYER) {
+                            this.selected = [r, c];
+                        }
+                    } else {
+                        const [fr, fc] = this.selected;
+                        // 再次点击：尝试跳跃
+                        if (!(r === fr && c === fc)) {
+                            const success = this.makeJump(fr, fc, r, c);
+                            if (success) {
+                                this.updateUI();
+                            }
+                            this.selected = null;
+                        } else {
+                            this.selected = null;
+                        }
+                    }
+                    
+                    this.draw();
+                });
+                
+                // 键盘事件
+                document.addEventListener('keydown', (e) => {
+                    if (e.ctrlKey && e.key === 'z') {
+                        e.preventDefault();
+                        this.undo();
+                        this.draw();
+                    } else if (e.ctrlKey && e.key === 'r') {
+                        e.preventDefault();
+                        this.restart();
+                    } else if (e.key === 'Escape') {
+                        this.selected = null;
+                        this.draw();
+                    }
+                });
+                
+                // 按钮事件
+                document.getElementById('undoBtn').addEventListener('click', () => {
+                    this.undo();
+                    this.draw();
+                });
+                
+                document.getElementById('restartBtn').addEventListener('click', () => {
+                    this.restart();
+                });
+                
+                // 新按钮事件
+                document.getElementById('generateBtn').addEventListener('click', () => {
+                    const difficulty = document.getElementById('difficultySelect').value;
+                    this.generateLevel(difficulty);
+                });
+                
+                document.getElementById('copyBtn').addEventListener('click', () => {
+                    const code = this.exportLevel();
+                    navigator.clipboard.writeText(code).then(() => {
+                        alert('关卡代码已复制到剪贴板！');
+                    }).catch(err => {
+                        console.error('无法复制', err);
+                        prompt('请手动复制以下代码:', code);
+                    });
+                });
+                
+                document.getElementById('loadBtn').addEventListener('click', () => {
+                    const code = prompt('请输入关卡代码:');
+                    if (code) {
+                        if (this.importLevel(code)) {
+                             // Success
+                        } else {
+                            alert('无效的关卡代码！');
+                        }
+                    }
+                });
+                
+                document.getElementById('hintBtn').addEventListener('click', () => {
+                    const path = this.solveGameBFS(this.board, this.playerPos);
+                    if (path) {
+                        this.hintPath = path;
+                        this.draw();
+                    } else {
+                        alert('当前局面无解或无法找到路径！');
+                    }
+                });
+            }
+        }
+        
+        // -----------------------------------------------------
+        // 初始化游戏
+        // -----------------------------------------------------
+        document.addEventListener('DOMContentLoaded', () => {
+            const game = new Game();
+        });
+    </script>
+</body>
+</html>
