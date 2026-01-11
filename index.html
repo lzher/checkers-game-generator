@@ -516,124 +516,153 @@
                 return Math.max(0, totalSteps - forcedSteps);
             }
 
+            /**
+             * 【核心改进】使用逆向倒推法生成关卡
+             * 原理：从终点开始，反向跳跃并生成棋子，最后停留的位置即为起点。
+             * 优势：100% 保证有解，且天然形成严密的逻辑链。
+             */
             generateLevel(difficulty) {
-                // 清空现有策略，使用分治思想的新算法
-                const startTime = Date.now();
-                
                 // 1. 初始化空盘
                 this.board = this.createEmptyBoard();
-                this.boardColors = this.createEmptyColorLayer();
+                this.boardColors = this.createEmptyColorLayer(); // 确保颜色层也被重置
                 this.createAxialMapping();
                 
-                // 2. 确定起点和终点
-                // 终点：顶部三角形区域 (Row 0-3)
-                const goalCandidates = [];
-                for(let r=0; r<=3; r++) {
-                    for(let c=0; c<BOARD_COLS; c++) {
-                        if(this.board[r][c] !== INVALID) goalCandidates.push([r, c]);
-                    }
-                }
-                const endPos = goalCandidates[Math.floor(Math.random() * goalCandidates.length)];
-                
-                // 起点：底部区域 (Row 13-16)
-                const startCandidates = [];
-                for(let r=13; r<BOARD_ROWS; r++) {
-                    for(let c=0; c<BOARD_COLS; c++) {
-                        if(this.board[r][c] !== INVALID) startCandidates.push([r, c]);
-                    }
-                }
-                const startPos = startCandidates[Math.floor(Math.random() * startCandidates.length)];
-                
-                // 3. 路径生成 (分治法)
-                // 记录已占用的格子 (Key: "r,c")
-                const occupied = new Set();
-                occupied.add(`${startPos[0]},${startPos[1]}`);
-                occupied.add(`${endPos[0]},${endPos[1]}`);
-                
-                // 定义路点数量，基于难度
-                let waypointCount = 1;
-                if (difficulty === 'medium') waypointCount = 2;
-                if (difficulty === 'high') waypointCount = 3;
-                
-                // 递归生成主路径
-                // 我们将路径视为从 Start -> Goal 的一系列跳跃
-                // 每次跳跃需要: Current -> (Over) -> Next
-                // (Over) 位置必须放置障碍物，Next 位置必须为空
-                // 我们只生成 Next 序列，最后统一填充 Over
-                
-                const mainPath = this.generatePathDivideAndConquer(startPos, endPos, waypointCount, occupied);
-                
-                if (!mainPath) {
-                    console.warn("Path generation failed, retrying...");
-                    // 简单的重试机制，防止死循环
-                    if (!this._retryCount) this._retryCount = 0;
-                    if (this._retryCount < 3) {
-                        this._retryCount++;
-                        this.generateLevel(difficulty);
-                    } else {
-                        this._retryCount = 0;
-                        alert("生成失败，请重试");
-                    }
-                    return;
-                }
-                this._retryCount = 0;
-                
-                // 4. 实例化主路径
-                this.instantiatePathSequence(mainPath);
-                
-                // 5. 分支生成 (细化和复杂化)
-                // 在主路径的节点上引出分支
-                // 分支之间以及与主路径之间不能冲突
-                
-                // 重新计算 occupied，包含主路径上的所有点（落脚点和中间子）
-                const fullOccupied = this.getReservedCellsFromPath(mainPath);
-                
-                const branchChance = difficulty === 'high' ? 0.7 : (difficulty === 'medium' ? 0.5 : 0.3);
-                const maxBranchDepth = difficulty === 'high' ? 4 : (difficulty === 'medium' ? 3 : 2);
-                
-                // 对主路径上的每个点（除了终点），尝试生成分支
-                // 为了增加迷惑性，分支应该是“死路”，即从主路径分叉出去，跳几步后无路可走
-                // 或者更高级的：分支看起来能通向终点，但其实断了
-                
-                // 我们这里生成从主路径点出发的“干扰路径”
-                for (let i = 0; i < mainPath.length - 1; i++) {
-                    const node = mainPath[i];
-                    if (Math.random() < branchChance) {
-                        this.generateInterference(node, maxBranchDepth, fullOccupied);
+                // 难度配置：决定倒推的步数（步数越多，解法越长）
+                // bias: 向下(Row增加)移动的倾向概率，由0.5到1.0，越大越容易把起点生成在底部
+                const config = {
+                    'easy':   { steps: 8,  bias: 0.6 },
+                    'medium': { steps: 16, bias: 0.75 },
+                    'hard':   { steps: 25, bias: 0.85 },
+                    'high':   { steps: 35, bias: 0.9  }
+                };
+                const params = config[difficulty] || config['medium'];
+
+                // 2. 确定终点 (Goal)
+                // 在顶部三角形区域 (Row 0-3) 随机选一个合法的点作为“最终归宿”
+                let validGoals = [];
+                for (let r = 0; r <= 3; r++) {
+                    for (let c = 0; c < BOARD_COLS; c++) {
+                        if (this.isValidPos(r, c)) {
+                            validGoals.push({ r, c });
+                        }
                     }
                 }
                 
-                // 6. 保存并应用
-                this.playerPos = [...startPos];
-                this.board[startPos[0]][startPos[1]] = PLAYER;
+                // 简单的重试机制
+                let success = false;
+                let attempts = 0;
                 
-                // 验证解法
-                const solution = this.solveGameBFS(this.board, this.playerPos);
-                if (!solution) {
-                    console.warn("Generated level unsolvable (verification failed), retrying...");
-                    this.generateLevel(difficulty);
-                    return;
+                while (!success && attempts < 10) {
+                    attempts++;
+                    
+                    // 重置棋盘
+                    this.board = this.createEmptyBoard();
+                    this.boardColors = this.createEmptyColorLayer();
+                    
+                    // 随机选一个终点
+                    let currentPos = validGoals[Math.floor(Math.random() * validGoals.length)];
+                    this.board[currentPos.r][currentPos.c] = PLAYER;
+                    
+                    // 3. 逆向游走 (Reverse Walk)
+                    let stepsTaken = 0;
+                    const obstacleColors = ['#FF5252', '#448AFF', '#E040FB', '#FFAB40', '#00E676']; // 障碍物颜色池
+
+                    // 尝试生成指定步数
+                    for (let i = 0; i < params.steps; i++) {
+                        const moves = this.getValidReverseMoves(currentPos);
+                        
+                        if (moves.length === 0) {
+                            // 无路可退，如果是最初几步就死路，说明运气不好，跳出重试
+                            break;
+                        }
+                        
+                        // 选择下一步：引入方向偏向性，倾向于往底部走（Row增大）
+                        // 这样生成的起点更可能在底部
+                        let selectedMove;
+                        const movesDown = moves.filter(m => m.to.r > currentPos.r); // 向下方(Row变大)的移动
+                        
+                        if (movesDown.length > 0 && Math.random() < params.bias) {
+                            selectedMove = movesDown[Math.floor(Math.random() * movesDown.length)];
+                        } else {
+                            selectedMove = moves[Math.floor(Math.random() * moves.length)];
+                        }
+                        
+                        // --- 执行逆向操作 ---
+                        // 1. 玩家从 current 移到 to (prev)
+                        this.board[currentPos.r][currentPos.c] = EMPTY; // 原位置变空
+                        this.board[selectedMove.to.r][selectedMove.to.c] = PLAYER; // 玩家瞬移到起跳点
+                        
+                        // 2. 中间生成障碍物 (mid) - 这就是被吃掉的那颗子
+                        this.board[selectedMove.mid.r][selectedMove.mid.c] = OBSTACLE;
+                        const randomColor = obstacleColors[Math.floor(Math.random() * obstacleColors.length)];
+                        this.boardColors[selectedMove.mid.r][selectedMove.mid.c] = randomColor;
+                        
+                        // 更新指针
+                        currentPos = selectedMove.to;
+                        stepsTaken++;
+                    }
+                    
+                    // 检查生成的关卡是否合格
+                    // 标准：步数达到预期的一半以上，且起点在第10行以后(接近底部)
+                    if (stepsTaken >= params.steps * 0.6 && currentPos.r > 10) {
+                        success = true;
+                        this.playerPos = [currentPos.r, currentPos.c];
+                        console.log(`生成成功：难度 ${difficulty}, 步数 ${stepsTaken}, 起点 [${currentPos.r},${currentPos.c}]`);
+                    }
                 }
                 
-                // 保存生成的关卡数据
-                this.generatedLevelData = this.saveCurrentLevelData();
-                this.currentLevel = this.generatedLevelData;
-                
-                // 刷新UI
-                this.updateUI();
-                this.draw();
-                
-                // 胜利消息更新
-                const victoryMsg = document.getElementById('victoryMessage');
-                victoryMsg.style.display = 'block';
-                const avgBranching = this.calculateAvgBranchingFactor(solution);
-                const effSteps = this.calculateEffectiveSteps(solution);
-                
-                victoryMsg.innerHTML = `生成成功！<br>难度: ${difficulty}<br>总步数: ${solution.length-1}<br>有效步数: ${effSteps}<br>平均分支: ${avgBranching.toFixed(1)}`;
-                setTimeout(() => {
-                    victoryMsg.style.display = 'none';
-                }, 3000);
+                if (!success) {
+                    console.warn("未能生成完美符合要求的关卡，使用最后一次结果");
+                }
+
+                // 4. 更新UI
+                if (this.updateUI) this.updateUI();
+                if (this.drawBoard) this.drawBoard();
             }
+
+            /**
+             * 辅助方法：获取合法的逆向跳跃
+             * 定义：玩家在C，反向跳回A，中间生成B。要求A和B当前必须是空的。
+             */
+            getValidReverseMoves(pos) {
+                const moves = [];
+                const { r, c } = pos;
+                
+                // 使用全局定义的 AXIAL_DIRS
+                for (let dir of AXIAL_DIRS) {
+                    // 中间点 (Mid) - 被吃掉的子
+                    const midR = r + dir[0];
+                    const midC = c + dir[1];
+                    
+                    // 落脚点 (To) - 跳跃起点
+                    const toR = r + dir[0] * 2;
+                    const toC = c + dir[1] * 2;
+                    
+                    // 1. 检查坐标是否在界内且格子有效
+                    if (!this.isValidPos(midR, midC) || !this.isValidPos(toR, toC)) continue;
+                    
+                    // 2. 检查逻辑冲突
+                    // 逆向跳跃时，我们要去的“起跳点(to)”必须是空的
+                    // 中间要生成的“被吃子(mid)”也必须是空的（不能本来就有子）
+                    if (this.board[midR][midC] === EMPTY && this.board[toR][toC] === EMPTY) {
+                        moves.push({
+                            to: { r: toR, c: toC },
+                            mid: { r: midR, c: midC }
+                        });
+                    }
+                }
+                return moves;
+            }
+
+            /**
+             * 辅助方法：检查坐标有效性
+             */
+            isValidPos(r, c) {
+                return r >= 0 && r < BOARD_ROWS && 
+                    c >= 0 && c < BOARD_COLS && 
+                    this.board[r][c] !== INVALID;
+            }
+
             
             // 分治法生成路径
             generatePathDivideAndConquer(start, end, depth, occupied) {
