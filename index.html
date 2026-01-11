@@ -454,17 +454,78 @@
                 this.createAxialMapping();
             }
 
+            calculateEffectiveSteps(path) {
+                if (!path || path.length < 2) return 0;
+                
+                // 备份状态
+                const savedBoard = this.board.map(row => [...row]);
+                const savedColors = this.boardColors.map(row => [...row]);
+                const savedPlayer = [...this.playerPos];
+                const savedRem = this.remainingPieces;
+                const savedMove = this.moveCount;
+                
+                let forcedSteps = 0;
+                
+                try {
+                    // 模拟路径每一步
+                    for (let i = 0; i < path.length - 1; i++) {
+                        const currentPos = path[i];
+                        const nextPos = path[i+1];
+                        
+                        // 确保玩家在当前位置
+                        this.board[currentPos[0]][currentPos[1]] = PLAYER;
+                        this.playerPos = [currentPos[0], currentPos[1]];
+                        this.createAxialMapping();
+                        
+                        // 检查当前分支数
+                        const jumps = this.findAllJumpsFrom(currentPos[0], currentPos[1]);
+                        
+                        if (jumps.length > 1) {
+                            // 发现分支点，后续步骤均为有效步骤
+                            break;
+                        }
+                        
+                        // 只有一个选择（或者没有选择，但路径存在说明有一个），这是强制步骤
+                        forcedSteps++;
+                        
+                        // 执行跳跃更新盘面
+                        const jumpInfo = this.analyzeJump(currentPos[0], currentPos[1], nextPos[0], nextPos[1]);
+                        if (jumpInfo) {
+                            const [mr, mc] = jumpInfo.mid;
+                            this.board[currentPos[0]][currentPos[1]] = EMPTY;
+                            this.board[mr][mc] = EMPTY;
+                            this.boardColors[mr][mc] = null;
+                            this.board[nextPos[0]][nextPos[1]] = PLAYER;
+                        }
+                    }
+                } catch (e) {
+                    console.error("Error calculating effective steps", e);
+                } finally {
+                    // 恢复状态
+                    this.board = savedBoard;
+                    this.boardColors = savedColors;
+                    this.playerPos = savedPlayer;
+                    this.remainingPieces = savedRem;
+                    this.moveCount = savedMove;
+                    this.createAxialMapping();
+                }
+                
+                const totalSteps = path.length - 1;
+                // 有效步数 = 总步数 - 初始强制步数
+                return Math.max(0, totalSteps - forcedSteps);
+            }
+
             generateLevel(difficulty) {
                 // 难度设置
-                let minSteps = 5;
+                let minSteps = 8;
                 let targetBranching = 1.2; // 低难度分支少
                 
                 if (difficulty === 'medium') { 
-                    minSteps = 10; 
+                    minSteps = 15; 
                     targetBranching = 1.5; // 中难度分支适中
                 }
                 if (difficulty === 'high') { 
-                    minSteps = 12; // 步数不必太高，重点是分支
+                    minSteps = 20; 
                     targetBranching = 2.2; // 高难度分支多
                 }
                 
@@ -474,17 +535,14 @@
                 this.createAxialMapping(); 
 
                 // 2. 随机选择起点（顶部）和 终点（底部）
-                // 恢复为原来的逻辑：只确定起点，终点不固定（只要到达底部区域即可）
-                // 这样可以大大提高生成成功率
-                
                 const startTime = Date.now();
                 const TIME_LIMIT = 10000; // 10秒超时
                 
                 let success = false;
                 let bestLevel = null;
-                let maxFoundSteps = 0;
+                let maxEffectiveSteps = -1; // 使用有效步数作为评估标准
                 
-                // 确定起点 (游戏结束位置，生成器的Start)
+                // 确定起点
                 let startCandidates = [];
                 for (let r = 0; r < 4; r++) {
                     for (let c = 0; c < BOARD_COLS; c++) {
@@ -494,7 +552,7 @@
                     }
                 }
                 
-                // 目标终点区域 (仅用于启发式引导，不强制)
+                // 目标终点区域
                 let endCandidates = [];
                 for (let r = 13; r < BOARD_ROWS; r++) {
                     for (let c = 0; c < BOARD_COLS; c++) {
@@ -506,7 +564,6 @@
 
                 // 尝试多次生成
                 for(let i=0; i<50; i++) {
-                    // 超时检查
                     if (Date.now() - startTime > TIME_LIMIT) {
                         console.warn("Generation timed out!");
                         break;
@@ -516,10 +573,7 @@
                     this.board = this.createEmptyBoard();
                     this.boardColors = this.createEmptyColorLayer();
                     
-                    // 随机选择起点
                     const [startR, startC] = startCandidates[Math.floor(Math.random() * startCandidates.length)];
-                    
-                    // 随机选择一个引导目标（仅作为磁铁，不强制到达）
                     const [endR, endC] = endCandidates[Math.floor(Math.random() * endCandidates.length)];
                     
                     // 设置生成器起点 (Game End)
@@ -528,34 +582,21 @@
                     
                     const targetPos = [endR, endC];
 
-                    // 3. 新的生成策略：骨架 + 复杂化
-                    
-                    // A. 生成骨架 (简单的直线路径)
-                    const skeletonPath = this.generateSkeleton(this.playerPos, targetPos);
+                    // 3. 骨架 + 复杂化
+                    const skeletonPath = this.generateSkeleton(this.playerPos, targetPos, difficulty);
                     
                     if (skeletonPath) {
-                        // B. 复杂化路径 (插入折返和绕路)
                         const complexPath = this.complexifyPath(skeletonPath, minSteps, startTime);
                         
-                        // C. 构建最终盘面
                         if (complexPath.length - 1 >= minSteps) {
                             // 重建棋盘
                             this.board = this.createEmptyBoard();
                             this.boardColors = this.createEmptyColorLayer();
                             
-                            // 根据路径放置障碍物
-                            // complexPath 是反向路径：End -> ... -> Start
-                            // 每一个步骤 P[i] -> P[i+1] 意味着在反向跳跃，中间产生一个障碍物
-                            // 最终 Start 位置是 P[last]，也就是实际游戏的起点
-                            
-                            // 我们需要把 Player 放在 Start (complexPath 最后一个点)
-                            // 并把路径上产生的所有障碍物放到棋盘上
-                            
                             const startNode = complexPath[complexPath.length - 1];
                             this.board[startNode[0]][startNode[1]] = PLAYER;
                             this.playerPos = [...startNode];
                             
-                            // 放置障碍物
                             for (let k = 0; k < complexPath.length - 1; k++) {
                                 const p1 = complexPath[k];
                                 const p2 = complexPath[k+1];
@@ -569,69 +610,69 @@
                             
                             this.createAxialMapping();
                             
-                            // 验证
-                            const actualPath = this.solveGameBFS(this.board, this.playerPos);
-                            const actualSteps = actualPath ? actualPath.length - 1 : 0;
+                            // 验证基础路径
+                            let actualPath = this.solveGameBFS(this.board, this.playerPos);
+                            let actualSteps = actualPath ? actualPath.length - 1 : 0;
                             
                             if (actualPath && actualSteps >= minSteps) {
-                                success = true;
-                                break;
-                            }
-                            
-                             // 记录最佳结果
-                            if (actualPath && actualSteps > maxFoundSteps) {
-                                maxFoundSteps = actualSteps;
-                                bestLevel = {
-                                    board: this.board.map(row => [...row]),
-                                    boardColors: this.boardColors.map(row => [...row]),
-                                    playerPos: [...this.playerPos]
-                                };
+                                // 4. 增加干扰项 (现在在验证前添加，因为干扰项影响有效步数)
+                                const reservedSet = this.getReservedCellsFromPath(actualPath);
+                                this.addDecoysSmartly(targetBranching, reservedSet, minSteps, actualPath);
+                                
+                                // 4.1 强力提升分支系数
+                                this.boostBranchingFactor(targetBranching, reservedSet, minSteps);
+                                
+                                // 重新求解最终路径（因为可能产生了捷径，或者需要确认路径仍有效）
+                                actualPath = this.solveGameBFS(this.board, this.playerPos);
+                                if (!actualPath) continue;
+                                
+                                // 5. 计算有效步数 (排除初始强制移动)
+                                const effectiveSteps = this.calculateEffectiveSteps(actualPath);
+                                
+                                if (effectiveSteps >= minSteps) {
+                                    success = true;
+                                    this.currentLevel = this.saveCurrentLevelData();
+                                    break;
+                                }
+                                
+                                // 记录最佳结果
+                                if (effectiveSteps > maxEffectiveSteps) {
+                                    maxEffectiveSteps = effectiveSteps;
+                                    bestLevel = this.saveCurrentLevelData();
+                                    bestLevel.board = this.board.map(row => [...row]); // 保存完整board用于恢复
+                                    bestLevel.boardColors = this.boardColors.map(row => [...row]);
+                                    bestLevel.playerPos = [...this.playerPos];
+                                }
                             }
                         }
                     }
                 }
                 
                 if (!success) {
-                    if (bestLevel && maxFoundSteps >= Math.max(5, minSteps * 0.6)) {
-                        // 如果有尚可的备选方案（至少达到目标60%），则使用它
+                    if (bestLevel && maxEffectiveSteps >= Math.max(3, minSteps * 0.4)) { // 稍微降低门槛
                         this.board = bestLevel.board;
                         this.boardColors = bestLevel.boardColors;
                         this.playerPos = bestLevel.playerPos;
                         this.createAxialMapping();
-                        console.log(`未达到目标步数 ${minSteps}，降级使用 ${maxFoundSteps} 步的关卡`);
+                        this.currentLevel = bestLevel;
+                        console.log(`未达到目标步数 ${minSteps}，降级使用有效步数 ${maxEffectiveSteps} 的关卡`);
                     } else {
-                        alert(`生成关卡失败（无法满足步数要求，最高 ${maxFoundSteps} 步），请重试`);
+                        alert(`生成关卡失败（无法满足步数要求），请重试`);
                         return;
-                    }
-                }
-                
-                // 4. 计算保留区域（确保主路径不被堵塞）
-                // 获取当前解法路径
-                const solutionPath = this.solveGameBFS(this.board, this.playerPos);
-                const reservedSet = this.getReservedCellsFromPath(solutionPath);
-                
-                // 5. 增加干扰项（提升分支系数）
-                // 这里的策略是：添加障碍物，然后检查分支系数，直到达标
-                this.addDecoysSmartly(targetBranching, reservedSet, minSteps, solutionPath);
-                
-                // 6. 保存关卡
-                this.currentLevel = {
-                    obstacles: [],
-                    player: this.playerPos
-                };
-                
-                for(let r=0; r<BOARD_ROWS; r++) {
-                    for(let c=0; c<BOARD_COLS; c++) {
-                        if(this.board[r][c] === OBSTACLE) {
-                            this.currentLevel.obstacles.push([r, c, this.boardColors[r][c]]);
-                        }
                     }
                 }
                 
                 // 重置游戏
                 this.history = [];
                 this.moveCount = 0;
-                this.remainingPieces = this.currentLevel.obstacles.length;
+                this.remainingPieces = 0;
+                // 重新计算剩余棋子
+                for(let r=0; r<BOARD_ROWS; r++) {
+                    for(let c=0; c<BOARD_COLS; c++) {
+                        if(this.board[r][c] === OBSTACLE) this.remainingPieces++;
+                    }
+                }
+                
                 this.gameWon = false;
                 this.selected = null;
                 this.hintPath = null;
@@ -643,12 +684,28 @@
                 const victoryMsg = document.getElementById('victoryMessage');
                 victoryMsg.style.display = 'block';
                 const finalSol = this.solveGameBFS(this.board, this.playerPos);
-                // 此时不需要重新计算分支系数，直接估算或者再算一次
                 const avgBranching = this.calculateAvgBranchingFactor(finalSol);
-                victoryMsg.innerHTML = `生成成功！<br>最短步数: ${finalSol ? finalSol.length-1 : '?'} <br>平均分支: ${avgBranching.toFixed(1)}`;
+                const effSteps = this.calculateEffectiveSteps(finalSol);
+                
+                victoryMsg.innerHTML = `生成成功！<br>总步数: ${finalSol ? finalSol.length-1 : '?'} <br>有效步数: ${effSteps}<br>平均分支: ${avgBranching.toFixed(1)}`;
                 setTimeout(() => {
                     victoryMsg.style.display = 'none';
                 }, 3000);
+            }
+            
+            saveCurrentLevelData() {
+                const data = {
+                    obstacles: [],
+                    player: this.playerPos
+                };
+                for(let r=0; r<BOARD_ROWS; r++) {
+                    for(let c=0; c<BOARD_COLS; c++) {
+                        if(this.board[r][c] === OBSTACLE) {
+                            data.obstacles.push([r, c, this.boardColors[r][c]]);
+                        }
+                    }
+                }
+                return data;
             }
 
             // 从路径中提取所有保留格子（起点、终点、中间被吃掉的子、路径经过的空格）
@@ -725,60 +782,276 @@
             }
             
             addDecoysSmartly(targetBranching, reservedSet, minSteps, initialPath) {
-                let currentBranching = this.calculateAvgBranchingFactor(initialPath);
+                // 策略升级：优先利用现有资源制造分支，专注于打破“单行道”
+                // 关键点：严防捷径 (Shortcuts)
                 
-                // 1. 获取候选点（路径周围的点）
-                let candidates = this.getDecoyCandidates(initialPath, reservedSet);
-                
-                // 2. 随机打乱
-                for (let i = candidates.length - 1; i > 0; i--) {
-                    const j = Math.floor(Math.random() * (i + 1));
-                    [candidates[i], candidates[j]] = [candidates[j], candidates[i]];
-                }
-                
-                // 3. 尽力而为：遍历候选点尝试放置
-                // 用户指示：“能加就加，不能加就算了”
-                // 不再强求达到 targetBranching，而是遍历一遍候选集，能放的都放上去
-                let addedCount = 0;
-                // 限制最大添加数量，防止棋盘太乱
-                // 高难度多加点，低难度少加点
-                const maxDecoys = (targetBranching > 2.0) ? 25 : 10; 
-                
-                for (const [r, c] of candidates) {
-                    if (addedCount >= maxDecoys) break;
+                let currentBestPath = this.solveGameBFS(this.board, this.playerPos);
+                if (!currentBestPath) return; // Should not happen
+                let currentBestSteps = currentBestPath.length - 1;
+
+                // 1. 识别“强制移动”点 (Choke Points) 并尝试制造死胡同
+                for (let pass = 0; pass < 3; pass++) {
+                    const currentPath = this.solveGameBFS(this.board, this.playerPos);
+                    if (!currentPath) break;
                     
-                    // 试着放置
-                    this.board[r][c] = OBSTACLE;
-                    this.createAxialMapping(); 
+                    // 模拟路径，找到分支数为1的节点
+                    this.enhancePathBranching(currentPath, reservedSet, currentBestSteps);
                     
-                    // A. 捷径检查（必须保留，否则高难度会变简单）
+                    // 更新当前最佳步数 (enhancePathBranching 内部可能会引入轻微的步数变化，我们接受更长的，拒绝更短的)
                     const newPath = this.solveGameBFS(this.board, this.playerPos);
-                    if (!newPath || (newPath.length - 1) < minSteps) {
-                        // 产生捷径或无解 -> 撤销
-                        this.board[r][c] = EMPTY;
-                        continue;
-                    }
-
-                    // B. 分支系数检查
-                    const newBranching = this.calculateAvgBranchingFactor(newPath);
-                    
-                    // 只要分支系数不降低太多，或者有提升，就保留
-                    // 放宽标准：只要是合法干扰项，就倾向于保留
-                    // 低难度严格限制分支系数，不要太高
-                    if (targetBranching < 1.5 && newBranching > 1.8) {
-                        this.board[r][c] = EMPTY; // 太难了，撤销
-                        continue;
-                    }
-
-                    if (newBranching >= currentBranching - 0.1) {
-                        this.assignRandomColor(r, c);
-                        currentBranching = newBranching;
-                        addedCount++;
-                    } else {
-                        // 如果严重降低了分支系数（说明堵住了很多路），则撤销
-                        this.board[r][c] = EMPTY;
+                    if (newPath) {
+                        currentBestSteps = newPath.length - 1;
                     }
                 }
+                
+                // 2. 补充常规噪音 (如果还需要)
+                const currentEffSteps = this.calculateEffectiveSteps(this.solveGameBFS(this.board, this.playerPos));
+                if (currentEffSteps < minSteps) {
+                    this.addRandomDecoys(targetBranching, reservedSet, currentBestSteps, initialPath);
+                }
+            }
+
+            boostBranchingFactor(targetBranching, reservedSet, minSteps) {
+                let currentBranching = this.calculateAvgBranchingFactor();
+                let attempts = 0;
+                const MAX_ATTEMPTS = 50; // 增加尝试次数
+                
+                // 循环尝试直到达到目标分支系数
+                while (currentBranching < targetBranching && attempts < MAX_ATTEMPTS) {
+                    attempts++;
+                    
+                    const path = this.solveGameBFS(this.board, this.playerPos);
+                    if (!path) break;
+                    
+                    const candidates = [];
+                    
+                    // 遍历路径上的点，寻找可以制造分支的位置
+                    // 只需要采样一部分点，避免计算量过大
+                    const step = Math.max(1, Math.floor(path.length / 10));
+                    for (let i = 0; i < path.length - 1; i += step) {
+                        const [r, c] = path[i];
+                        const startKey = `${r},${c}`;
+                        if (!this.indexToAxial.has(startKey)) continue;
+                        const [q, axR] = this.indexToAxial.get(startKey);
+                        
+                        // 尝试6个方向
+                        for (const [dq, dr] of AXIAL_DIRS) {
+                            // 优先制造长跳分支 (4, 6)
+                            for (const factor of [4, 6]) {
+                                const targetQ = q + dq * factor;
+                                const targetR = axR + dr * factor;
+                                const targetKey = `${targetQ},${targetR}`;
+                                
+                                const midQ = q + dq * (factor/2);
+                                const midR = axR + dr * (factor/2);
+                                const midKey = `${midQ},${midR}`;
+                                
+                                if (this.axialToIndex.has(targetKey) && this.axialToIndex.has(midKey)) {
+                                    const [tr, tc] = this.axialToIndex.get(targetKey);
+                                    const [mr, mc] = this.axialToIndex.get(midKey);
+                                    
+                                    // 条件：
+                                    // 1. 目标位为空
+                                    // 2. 中间位为空 (我们需要放障碍物)
+                                    // 3. 中间位不是保留位
+                                    if (this.board[tr][tc] === EMPTY && 
+                                        this.board[mr][mc] === EMPTY && 
+                                        !reservedSet.has(`${mr},${mc}`)) {
+                                            
+                                        // 检查路径是否通畅 (除了中间点)
+                                        let pathClear = true;
+                                        for(let k=1; k<factor; k++) {
+                                            if(k === factor/2) continue;
+                                            const pq = q + dq * k;
+                                            const pr = axR + dr * k;
+                                            const pKey = `${pq},${pr}`;
+                                            if(!this.axialToIndex.has(pKey)) { pathClear = false; break; }
+                                            const [prIdx, pcIdx] = this.axialToIndex.get(pKey);
+                                            if(this.board[prIdx][pcIdx] !== EMPTY) { pathClear = false; break; }
+                                        }
+                                        
+                                        if (pathClear) {
+                                            // 这是一个候选位置
+                                            candidates.push({mr, mc, tr, tc});
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    
+                    if (candidates.length === 0) break;
+                    
+                    // 随机选择一个候选位置
+                    const choice = candidates[Math.floor(Math.random() * candidates.length)];
+                    
+                    // 放置障碍物
+                    this.board[choice.mr][choice.mc] = OBSTACLE;
+                    this.assignRandomColor(choice.mr, choice.mc);
+                    this.createAxialMapping();
+                    
+                    // 验证
+                    const newPath = this.solveGameBFS(this.board, this.playerPos);
+                    
+                    // 必须满足：
+                    // 1. 仍有解
+                    // 2. 步数没有大幅减少 (捷径检测)
+                    // 3. 分支系数有所提高 (可选，或者是至少不降低太多)
+                    if (!newPath || (newPath.length - 1) < minSteps * 0.95) {
+                        // 失败回滚
+                        this.board[choice.mr][choice.mc] = EMPTY;
+                        this.boardColors[choice.mr][choice.mc] = null;
+                        this.createAxialMapping();
+                    } else {
+                        // 成功保留
+                        currentBranching = this.calculateAvgBranchingFactor(newPath);
+                        // 可以选择将新点加入reserved，或者不加允许被后续修改
+                    }
+                }
+            }
+            
+             // 这是一个备用的、简单的随机添加干扰项的方法
+             addRandomDecoys(targetBranching, reservedSet, minSteps, initialPath) {
+                  const noiseCandidates = this.getDecoyCandidates(initialPath, reservedSet);
+                  // Shuffle
+                   for (let i = noiseCandidates.length - 1; i > 0; i--) {
+                      const j = Math.floor(Math.random() * (i + 1));
+                      [noiseCandidates[i], noiseCandidates[j]] = [noiseCandidates[j], noiseCandidates[i]];
+                  }
+                  
+                  let addedCount = 0;
+                  const maxDecoys = 20;
+                  
+                  for (const [r, c] of noiseCandidates) {
+                      if (addedCount >= maxDecoys) break;
+                      if (this.board[r][c] !== EMPTY) continue;
+                      
+                      this.board[r][c] = OBSTACLE;
+                      this.createAxialMapping();
+                      
+                      // 验证是否破坏了主路径 (严防捷径)
+                      const checkPath = this.solveGameBFS(this.board, this.playerPos);
+                      // 如果无解，或者新路径比原定目标步数还短（说明打通了捷径），则回退
+                      if (!checkPath || (checkPath.length - 1) < minSteps * 0.9) { 
+                          this.board[r][c] = EMPTY; // 回退
+                      } else {
+                          this.assignRandomColor(r, c);
+                          addedCount++;
+                      }
+                  }
+             }
+             
+             enhancePathBranching(path, reservedSet, baselineSteps) {
+                 // 备份状态
+                 const savedBoard = this.board.map(row => [...row]);
+                 const savedColors = this.boardColors.map(row => [...row]);
+                 const savedPlayer = [...this.playerPos];
+                 
+                 try {
+                     // 遍历路径每一步
+                     for (let i = 0; i < path.length - 1; i++) {
+                         const currentPos = path[i];
+                         const nextPos = path[i+1];
+                         
+                         // 恢复玩家位置到这一步
+                         this.board[currentPos[0]][currentPos[1]] = PLAYER;
+                         this.playerPos = [currentPos[0], currentPos[1]];
+                         this.createAxialMapping();
+                         
+                         // 检查当前分支数
+                         const jumps = this.findAllJumpsFrom(currentPos[0], currentPos[1]);
+                         
+                         // 过滤出非主路径的分支
+                         const altJumps = jumps.filter(j => j[0] !== nextPos[0] || j[1] !== nextPos[1]);
+                         
+                         if (altJumps.length > 0) {
+                             // === 策略A：延伸现有分支 (复用棋子，增加深度) ===
+                             const branchStart = altJumps[Math.floor(Math.random() * altJumps.length)];
+                             
+                             // 模拟跳到 branchStart
+                             const jumpInfo = this.analyzeJump(currentPos[0], currentPos[1], branchStart[0], branchStart[1]);
+                             if (jumpInfo) {
+                                 const [mr, mc] = jumpInfo.mid;
+                                 const originalColor = this.boardColors[mr][mc];
+                                 
+                                 // Execute Jump temporarily
+                                 this.board[currentPos[0]][currentPos[1]] = EMPTY;
+                                 this.board[mr][mc] = EMPTY;
+                                 this.boardColors[mr][mc] = null;
+                                 this.board[branchStart[0]][branchStart[1]] = PLAYER;
+                                 this.playerPos = [...branchStart];
+                                 this.createAxialMapping();
+                                 
+                                 // Extend! (3-5 steps deep)
+                                 this.generateDeadEndBranch(branchStart[0], branchStart[1], 3, reservedSet, 10);
+                                 
+                                 // Rollback Jump (but keep new obstacles)
+                                 this.board[branchStart[0]][branchStart[1]] = EMPTY; // Player moved back
+                                 this.board[currentPos[0]][currentPos[1]] = PLAYER;
+                                 this.board[mr][mc] = OBSTACLE; // Restore eaten piece
+                                 this.boardColors[mr][mc] = originalColor;
+                                 this.playerPos = [...currentPos];
+                                 this.createAxialMapping();
+                             }
+                         } else {
+                             // === 策略B：制造新分支 (优先复用) ===
+                             this.createDeepBranchAt(currentPos, nextPos, reservedSet);
+                         }
+                         
+                         // 执行主路径的跳跃，继续下一步
+                         this.makeJumpInternal(currentPos, nextPos);
+                     }
+                 } catch (e) {
+                     console.error("Enhance loop error", e);
+                 } finally {
+                     // 恢复最终状态
+                     const finalBoard = this.createEmptyBoard();
+                     const finalColors = this.createEmptyColorLayer();
+                     
+                     for(let r=0; r<BOARD_ROWS; r++) {
+                         for(let c=0; c<BOARD_COLS; c++) {
+                             // 1. 恢复原始障碍物
+                             if (savedBoard[r][c] === OBSTACLE) {
+                                 finalBoard[r][c] = OBSTACLE;
+                                 finalColors[r][c] = savedColors[r][c];
+                             }
+                             // 2. 保留新增障碍物
+                             // 新增的特征：当前是 OBSTACLE，但原始是 EMPTY
+                             if (this.board[r][c] === OBSTACLE && savedBoard[r][c] === EMPTY) {
+                                 finalBoard[r][c] = OBSTACLE;
+                                 finalColors[r][c] = this.boardColors[r][c];
+                             }
+                             // 3. 恢复玩家到原始起点
+                             if (r === savedPlayer[0] && c === savedPlayer[1]) {
+                                 finalBoard[r][c] = PLAYER;
+                             }
+                         }
+                     }
+                     
+                     this.board = finalBoard;
+                     this.boardColors = finalColors;
+                     this.playerPos = [...savedPlayer];
+                     this.remainingPieces = 0;
+                     for(let r=0; r<BOARD_ROWS; r++) {
+                         for(let c=0; c<BOARD_COLS; c++) {
+                             if(this.board[r][c] === OBSTACLE) this.remainingPieces++;
+                         }
+                     }
+                     this.createAxialMapping();
+                 }
+             }
+            
+            makeJumpInternal(from, to) {
+                 const jumpInfo = this.analyzeJump(from[0], from[1], to[0], to[1]);
+                 if (jumpInfo) {
+                     const [mr, mc] = jumpInfo.mid;
+                     this.board[from[0]][from[1]] = EMPTY;
+                     this.board[mr][mc] = EMPTY; // 吃子
+                     this.boardColors[mr][mc] = null;
+                     this.board[to[0]][to[1]] = PLAYER;
+                     this.playerPos = [to[0], to[1]];
+                     this.createAxialMapping();
+                 }
             }
             
             getDecoyCandidates(path, reservedSet) {
@@ -876,42 +1149,67 @@
                 return steps > 0 ? totalBranches / steps : 0;
             }
 
-            // 生成骨架：寻找从Start(Top)到End(Bottom)的最短反向路径
-            // 注意：因为是反向生成，输入参数 startPos 是 Top (Game End), targetPos 是 Bottom (Game Start)
-            // 我们需要找一条从 Top 到 Bottom 的路径
-            generateSkeleton(startPos, targetPos) {
-                // 使用 BFS 寻找最短路径
-                // 此时棋盘被认为是空的，我们可以随意跳跃，只要不越界
-                // 但要避开 startPos (因为那是起点)
+            // 基础寻路 - 用于生成骨架
+            // geometricOnly: true 表示忽略棋盘上的实际障碍物，只看几何距离是否满足跳跃条件
+            findSkeletonPath(start, end, minFactor = 2, strictMode = false) {
+                // 使用带有启发式的搜索 (A* style but randomized)
+                const startKey = `${start[0]},${start[1]}`;
+                const endKey = `${end[0]},${end[1]}`;
                 
-                const queue = [[startPos]];
-                const visited = new Set();
-                visited.add(`${startPos[0]},${startPos[1]}`);
+                // Queue item: { pos: [r, c], path: [...], cost: 0 }
+                const queue = [{ pos: start, path: [start], cost: 0 }];
+                const visited = new Map(); // key -> cost
+                visited.set(startKey, 0);
                 
-                // 限制搜索深度
+                const bestPaths = [];
                 let iterations = 0;
+                const maxIterations = 5000; 
+                
                 while (queue.length > 0) {
-                    if (iterations++ > 5000) return null;
+                    iterations++;
+                    if (iterations > maxIterations) break;
                     
-                    const path = queue.shift();
-                    const current = path[path.length - 1];
+                    // 简单的启发式排序：(距离目标越近 + 步数越少) 优先
+                    queue.sort((a, b) => {
+                        const distA = Math.abs(a.pos[0] - end[0]) + Math.abs(a.pos[1] - end[1]);
+                        const distB = Math.abs(b.pos[0] - end[0]) + Math.abs(b.pos[1] - end[1]);
+                        return (distA + a.path.length) - (distB + b.path.length);
+                    });
                     
-                    // 到达目标
-                    if (current[0] === targetPos[0] && current[1] === targetPos[1]) {
-                        return path;
+                    const current = queue.shift();
+                    const currentKey = `${current.pos[0]},${current.pos[1]}`;
+                    
+                    // 如果到达目标附近 (距离小于等于2，且方向正确)
+                    if (current.pos[0] === end[0] && current.pos[1] === end[1]) {
+                        return current.path;
                     }
                     
-                    // 获取所有可能的几何反向跳跃（不考虑障碍物，因为是空的）
-                    // 在空棋盘上，反向跳跃 = 正向跳跃的逆操作
-                    // 即：从 Current 跳到 Next，中间隔着 Mid
-                    // 只要 Next 在界内即可
+                    // 随机打乱方向，增加多样性
+                    const dirs = [...AXIAL_DIRS];
+                    for (let i = dirs.length - 1; i > 0; i--) {
+                        const j = Math.floor(Math.random() * (i + 1));
+                        [dirs[i], dirs[j]] = [dirs[j], dirs[i]];
+                    }
                     
-                    for (const [dq, dr] of AXIAL_DIRS) {
-                        for (const factor of [2, 4]) { // 骨架只用短跳，方便后续扩展
-                            const startKey = `${current[0]},${current[1]}`;
-                            if (!this.indexToAxial.has(startKey)) continue;
+                    // 确定允许的跳跃因子
+                    let factors = [8, 6, 4, 2];
+                    if (minFactor >= 4) {
+                        if (strictMode) {
+                            factors = [8, 6, 4]; // 严格模式：禁止短跳
+                        } else {
+                            factors = [8, 6, 4, 2]; // 非严格模式：优先长跳，但允许短跳
+                        }
+                    }
+                    
+                    for (const [dq, dr] of dirs) {
+                        for (const factor of factors) {
+                            // 如果是严格模式且当前尝试的是短跳，跳过
+                            if (strictMode && factor < 4) continue;
                             
-                            const [q1, r1] = this.indexToAxial.get(startKey);
+                            const startK = `${current.pos[0]},${current.pos[1]}`;
+                            if (!this.indexToAxial.has(startK)) continue;
+                            const [q1, r1] = this.indexToAxial.get(startK);
+                            
                             const nextQ = q1 + dq * factor;
                             const nextR = r1 + dr * factor;
                             const nextKey = `${nextQ},${nextR}`;
@@ -920,9 +1218,15 @@
                                 const [nr, nc] = this.axialToIndex.get(nextKey);
                                 const nKey = `${nr},${nc}`;
                                 
-                                if (!visited.has(nKey)) {
-                                    visited.add(nKey);
-                                    queue.push([...path, [nr, nc]]);
+                                const newCost = current.cost + 1;
+                                
+                                if (!visited.has(nKey) || visited.get(nKey) > newCost) {
+                                    visited.set(nKey, newCost);
+                                    queue.push({
+                                        pos: [nr, nc],
+                                        path: [...current.path, [nr, nc]],
+                                        cost: newCost
+                                    });
                                 }
                             }
                         }
@@ -930,103 +1234,185 @@
                 }
                 return null;
             }
+
+            // 生成骨架：寻找从Start(Top)到End(Bottom)的最短反向路径
+            generateSkeleton(startPos, targetPos, difficulty) {
+                // 1. 低难度
+                if (difficulty === 'low') {
+                    return this.findSkeletonPath(startPos, targetPos, 2);
+                }
+                
+                // 2. 中等难度
+                if (difficulty === 'medium') {
+                    // ... (保持原有逻辑，稍作优化)
+                     const midRows = [7, 8, 9];
+                     const waypoints = [];
+                     for (const r of midRows) {
+                         for (let c = 0; c < BOARD_COLS; c++) {
+                             if (this.board[r][c] !== INVALID) waypoints.push([r, c]);
+                         }
+                     }
+                     
+                     for (let i = 0; i < 20; i++) {
+                         const wp = waypoints[Math.floor(Math.random() * waypoints.length)];
+                         let path1 = this.findSkeletonPath(startPos, wp, 4, true); // 尝试严格长跳
+                         if (!path1) path1 = this.findSkeletonPath(startPos, wp, 4, false);
+                         if (!path1) continue;
+                         
+                         let path2 = this.findSkeletonPath(wp, targetPos, 4, true);
+                         if (!path2) path2 = this.findSkeletonPath(wp, targetPos, 4, false);
+                         if (!path2) continue;
+                         
+                         path1.pop();
+                         return path1.concat(path2);
+                     }
+                     return this.findSkeletonPath(startPos, targetPos, 2);
+                }
+
+                // 3. 高难度：强制长跳跃 (minFactor=4)
+                if (difficulty === 'high') {
+                    const leftWaypoints = [];
+                    const rightWaypoints = [];
+                    
+                    // 扩大路点范围
+                    for (let r = 5; r <= 12; r++) {
+                        for (let c = 0; c < BOARD_COLS; c++) {
+                            if (this.board[r][c] === INVALID) continue;
+                            if (c < 7) leftWaypoints.push([r, c]);
+                            else if (c > 9) rightWaypoints.push([r, c]);
+                        }
+                    }
+                    
+                    // 尝试多次，极大增加成功率
+                    for (let i = 0; i < 50; i++) {
+                        const goLeftFirst = Math.random() > 0.5;
+                        const w1Set = goLeftFirst ? leftWaypoints : rightWaypoints;
+                        const w2Set = goLeftFirst ? rightWaypoints : leftWaypoints;
+                        
+                        if (w1Set.length === 0 || w2Set.length === 0) continue;
+                        
+                        const w1 = w1Set[Math.floor(Math.random() * w1Set.length)];
+                        const w2 = w2Set[Math.floor(Math.random() * w2Set.length)];
+                        
+                        // 强制严格模式 (Strict Mode)
+                        // 第一段：起点 -> 路点1
+                        const p1 = this.findSkeletonPath(startPos, w1, 4, true);
+                        if (!p1) continue;
+                        
+                        // 第二段：路点1 -> 路点2
+                        const p2 = this.findSkeletonPath(w1, w2, 4, true);
+                        if (!p2) continue;
+                        
+                        // 第三段：路点2 -> 终点
+                        const p3 = this.findSkeletonPath(w2, targetPos, 4, true);
+                        if (!p3) continue;
+                        
+                        p1.pop();
+                        p2.pop();
+                        return p1.concat(p2).concat(p3);
+                    }
+                }
+                
+                // 只有在极少数情况下回退到非严格模式
+                console.warn("Skeleton generation fallback to loose mode");
+                return this.findSkeletonPath(startPos, targetPos, 4, false);
+            }
             
-            // 复杂化路径
+            // 复杂化路径：优先分割长线段，且支持多次迭代
             complexifyPath(initialPath, minSteps, startTime) {
                 let path = [...initialPath];
-                let noImprovementCount = 0;
                 
-                // 所有的点（包括路径点和障碍物点）都不能重叠
-                // 我们需要一个函数来计算当前路径占用的所有点
-                
-                while (path.length - 1 < minSteps && Date.now() - startTime < 8000) {
-                    if (noImprovementCount > 20) break;
+                // 持续尝试直到步数达标或无法继续
+                while (path.length - 1 < minSteps && Date.now() - startTime < 9000) {
+                    let bestSplit = null;
+                    let bestSplitScore = -Infinity;
                     
-                    // 随机选择一个线段 P[i] -> P[i+1]
-                    // 尝试将其替换为 P[i] -> M -> P[i+1] (增加1步)
-                    // 或者 P[i] -> M1 -> M2 -> P[i+1] (增加2步)
+                    // 1. 找出所有可分割的候选线段
+                    const segments = [];
+                    for(let i=0; i<path.length-1; i++) {
+                        const p1 = path[i];
+                        const p2 = path[i+1];
+                        const dist = Math.abs(p1[0] - p2[0]) + Math.abs(p1[1] - p2[1]);
+                        segments.push({idx: i, dist: dist, p1, p2});
+                    }
                     
-                    const idx = Math.floor(Math.random() * (path.length - 1));
-                    const p1 = path[idx];
-                    const p2 = path[idx+1];
+                    // 优先处理长线段
+                    segments.sort((a, b) => b.dist - a.dist);
                     
-                    // 计算当前路径占用的所有点 (Forbidden Set)
-                    const forbidden = new Set();
-                    for (let k = 0; k < path.length - 1; k++) {
-                        const a = path[k];
-                        const b = path[k+1];
-                        forbidden.add(`${a[0]},${a[1]}`);
-                        forbidden.add(`${b[0]},${b[1]}`);
+                    // 2. 尝试分割
+                    let improved = false;
+                    
+                    for (const seg of segments) {
+                        const {idx, p1, p2} = seg;
                         
-                        // 中间点
-                        const jumpInfo = this.analyzeJump(a[0], a[1], b[0], b[1]);
-                        if (jumpInfo) {
-                            forbidden.add(`${jumpInfo.mid[0]},${jumpInfo.mid[1]}`);
-                            jumpInfo.pathCells.forEach(pc => forbidden.add(`${pc[0]},${pc[1]}`));
+                        const forbidden = new Set();
+                        path.forEach(p => forbidden.add(`${p[0]},${p[1]}`));
+                        
+                        for (let k = 0; k < path.length - 1; k++) {
+                            if (k === idx) continue;
+                            const jump = this.analyzeJump(path[k][0], path[k][1], path[k+1][0], path[k+1][1]);
+                            if (jump) {
+                                forbidden.add(`${jump.mid[0]},${jump.mid[1]}`);
+                                jump.pathCells.forEach(pc => forbidden.add(`${pc[0]},${pc[1]}`));
+                            }
+                        }
+                        
+                        let candidates = [];
+                        
+                        for (const [dq, dr] of AXIAL_DIRS) {
+                            // 优先尝试长距离分割：因子越大，跳跃越远
+                            for (const factor of [6, 4, 2]) {
+                                const startKey = `${p1[0]},${p1[1]}`;
+                                const [q1, r1] = this.indexToAxial.get(startKey);
+                                const mq = q1 + dq * factor;
+                                const mr = r1 + dr * factor;
+                                const mKey = `${mq},${mr}`;
+                                
+                                if (!this.axialToIndex.has(mKey)) continue;
+                                const [mx, my] = this.axialToIndex.get(mKey);
+                                const mStr = `${mx},${my}`;
+                                
+                                if (forbidden.has(mStr)) continue;
+                                
+                                const jump1 = this.analyzeJump(p1[0], p1[1], mx, my);
+                                if (!jump1) continue;
+                                if (forbidden.has(`${jump1.mid[0]},${jump1.mid[1]}`)) continue;
+                                if (jump1.pathCells.some(pc => forbidden.has(`${pc[0]},${pc[1]}`))) continue;
+                                 
+                                const jump2 = this.analyzeJump(mx, my, p2[0], p2[1]);
+                                if (!jump2) continue;
+                                if (forbidden.has(`${jump2.mid[0]},${jump2.mid[1]}`)) continue;
+                                if (jump2.pathCells.some(pc => forbidden.has(`${pc[0]},${pc[1]}`))) continue;
+                                
+                                // 评分标准：
+                                // 1. 跳跃距离越长越好 (factor)
+                                // 2. 周围越空旷越好
+                                let openness = 0;
+                                for(const [ddq, ddr] of AXIAL_DIRS) {
+                                    const nq = mq + ddq * 2;
+                                    const nr = mr + ddr * 2;
+                                    const nKey = `${nq},${nr}`;
+                                    if(this.axialToIndex.has(nKey)) {
+                                        const [nx, ny] = this.axialToIndex.get(nKey);
+                                        if(!forbidden.has(`${nx},${ny}`)) openness++;
+                                    }
+                                }
+                                
+                                // factor 权重很大，鼓励长跳
+                                candidates.push({pos: [mx, my], score: openness + factor * 2 + Math.random() * 2});
+                            }
+                        }
+                        
+                        if (candidates.length > 0) {
+                            candidates.sort((a, b) => b.score - a.score);
+                            const best = candidates[0].pos;
+                            path.splice(idx + 1, 0, best);
+                            improved = true;
+                            break; 
                         }
                     }
-                    // 起点和终点 (对于这一段来说) 是允许重用的，因为我们是连接它们
-                    // 但 p1 和 p2 本身在 forbidden 里，这没关系，因为我们要找的是中间点 M
                     
-                    // 尝试寻找一个 M，使得 p1 -> M -> p2 成立
-                    // 条件：
-                    // 1. p1 -> M 合法
-                    // 2. M -> p2 合法
-                    // 3. M 不在 forbidden 中
-                    // 4. Mid(p1, M) 不在 forbidden 中
-                    // 5. Mid(M, p2) 不在 forbidden 中
-                    // 注意：Mid(p1, p2) (原障碍物) 是可以被占用的！因为我们把这一段删掉了。
-                    // 所以 forbidden 应该先排除当前这一段的中间点。
-                    
-                    // 修正 Forbidden：移除当前段的占用
-                    const currentJumpInfo = this.analyzeJump(p1[0], p1[1], p2[0], p2[1]);
-                    if (currentJumpInfo) {
-                        forbidden.delete(`${currentJumpInfo.mid[0]},${currentJumpInfo.mid[1]}`);
-                        currentJumpInfo.pathCells.forEach(pc => forbidden.delete(`${pc[0]},${pc[1]}`));
-                    }
-                    
-                    let bestDetour = null;
-                    
-                    // 搜索所有可能的 M
-                    for (const [dq, dr] of AXIAL_DIRS) {
-                        for (const factor of [2, 4, 6]) {
-                            const startKey = `${p1[0]},${p1[1]}`;
-                            const [q1, r1] = this.indexToAxial.get(startKey);
-                            const mq = q1 + dq * factor;
-                            const mr = r1 + dr * factor;
-                            const mKey = `${mq},${mr}`;
-                            
-                            if (!this.axialToIndex.has(mKey)) continue;
-                            const [mx, my] = this.axialToIndex.get(mKey);
-                            const mStr = `${mx},${my}`;
-                            
-                            if (forbidden.has(mStr)) continue;
-                            
-                            // 检查 p1 -> M
-                            const jump1 = this.analyzeJump(p1[0], p1[1], mx, my);
-                            if (!jump1) continue;
-                            if (forbidden.has(`${jump1.mid[0]},${jump1.mid[1]}`)) continue;
-                             
-                            // 检查 M -> p2
-                            const jump2 = this.analyzeJump(mx, my, p2[0], p2[1]);
-                            if (!jump2) continue;
-                            if (forbidden.has(`${jump2.mid[0]},${jump2.mid[1]}`)) continue;
-                            
-                            // 找到合法的 M
-                            bestDetour = [mx, my];
-                            break;
-                        }
-                        if (bestDetour) break;
-                    }
-                    
-                    if (bestDetour) {
-                        // 插入 M
-                        // path: [..., p1, p2, ...] -> [..., p1, M, p2, ...]
-                        path.splice(idx + 1, 0, bestDetour);
-                        noImprovementCount = 0;
-                    } else {
-                        noImprovementCount++;
-                    }
+                    if (!improved) break; 
                 }
                 
                 return path;
