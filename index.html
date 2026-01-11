@@ -254,20 +254,26 @@
             
             <div class="controls">
                 <div class="level-controls" style="width: 100%; display: flex; justify-content: center; gap: 10px; margin-bottom: 10px; flex-wrap: wrap;">
-                        <!-- 1. 步数输入框 (这是实际生效的值) -->
-                        <label style="font-weight: bold; color: #2c3e50;">目标步数:</label>
-                        <input type="number" id="stepInput" value="5" min="1" max="50" 
-                            style="width: 60px; padding: 10px; border-radius: 8px; border: 1px solid #bdc3c7; font-size: 1rem; text-align: center;">
+                    <!-- 1. 步数输入框 (这是实际生效的值) -->
+                    <label style="font-weight: bold; color: #2c3e50; display: flex; align-items: center; height: 100%;">目标步数:</label>
+                    <input type="number" id="stepInput" value="5" min="1" max="50" 
+                        style="width: 60px; padding: 10px; border-radius: 8px; border: 1px solid #bdc3c7; font-size: 1rem; text-align: center;">
 
-                        <!-- 2. 快速选择下拉框 (仅用于改变输入框的值) -->
-                        <select id="difficultyPreset" style="padding: 10px; border-radius: 8px; border: 1px solid #bdc3c7; background-color: white;">
-                            <option value="5">简单 (5步)</option>
-                            <option value="10">中等 (10步)</option>
-                            <option value="15">困难 (15步)</option>
-                            <option value="20">专家 (20步)</option>
-                            <option value="30">地狱 (30步)</option>
-                            <option value="-1">自定义</option>
-                        </select>
+                    <div style="display: flex; align-items: center; gap: 5px; margin-left: 10px;">
+                        <input type="checkbox" id="forceBottomStart" checked style="width: 18px; height: 18px; cursor: pointer;">
+                        <label for="forceBottomStart" style="cursor: pointer; user-select: none;">强制底部起点</label>
+                    </div>
+
+                    <!-- 2. 快速选择下拉框 (仅用于改变输入框的值) -->
+                    <select id="difficultyPreset" style="padding: 10px; border-radius: 8px; border: 1px solid #bdc3c7; background-color: white;">
+                        <option value="5">简单 (5步)</option>
+                        <option value="10">中等 (10步)</option>
+                        <option value="15">困难 (15步)</option>
+                        <option value="20">专家 (20步)</option>
+                        <option value="25">地狱 (25步)</option>
+                        <option value="-1">自定义</option>
+                    </select>
+
 
                     <button id="generateBtn" style="background-color: #9b59b6; color: white;">生成关卡</button>
                     <button id="hintBtn" style="background-color: #34495e; color: white;">显示答案</button>
@@ -461,19 +467,15 @@
                 this.createAxialMapping();
             }
 
-            // ==========================================
-            // 5.0 修正版：顶部终点 -> 底部起点
-            // ==========================================
-            // 7.0 最终版：直接接受数字步数
+            // 10.0 灵活版：支持可选的底部起点约束
             generateLevel(targetSteps) {
-                // 参数归一化：确保是数字
                 targetSteps = parseInt(targetSteps) || 5;
+                const timeout = Math.max(3000, targetSteps * 1500); 
                 
-                // 动态计算超时时间：步数越多，给的时间越多
-                // 简单: 3秒; 困难(15步): 10秒; 地狱(30步): 20秒
-                const timeout = Math.max(3000, targetSteps * 800); 
+                // 读取复选框状态
+                const forceBottom = document.getElementById('forceBottomStart').checked;
                 
-                console.log(`🚀 开始生成 ${targetSteps} 步关卡，超时限制: ${timeout/1000}秒`);
+                console.log(`🚀 开始生成 ${targetSteps} 步关卡 | 强制底部起点: ${forceBottom}`);
 
                 const startTime = Date.now();
                 let success = false;
@@ -483,27 +485,43 @@
                     this.boardColors = this.createEmptyColorLayer();
                     this.createAxialMapping();
 
-                    // 1. 顶部起点
+                    // 反向起点（游戏终点）始终在顶部
                     const endPos = this.getRandomTopTrianglePos(); 
                     if (!endPos) continue;
 
                     this.board[endPos[0]][endPos[1]] = PLAYER;
                     this.playerPos = [...endPos];
 
-                    // 2. 拓扑生长
                     if (this.growPathElegant(0, targetSteps, startTime, endPos)) {
-                        success = true;
-                        this.saveCurrentLevel(); // 保存数据供restart使用
-                        console.log(`✅ 生成成功!`);
-                        this.restart(); 
-                        return;
+                        
+                        // === 校验逻辑 ===
+                        if (forceBottom) {
+                            const [startR, startC] = this.playerPos;
+                            // 必须在倒数4行内 (BOARD_ROWS - 4)
+                            if (startR >= BOARD_ROWS - 4) {
+                                success = true;
+                            }
+                        } else {
+                            //如果不强制，只要生成成功就算成功
+                            success = true;
+                        }
+
+                        if (success) {
+                            this.saveCurrentLevel();
+                            console.log(`✅ 生成成功!`);
+                            this.restart(); 
+                            return;
+                        }
                     }
                 }
                 
-                // 失败处理
-                const spent = (Date.now() - startTime) / 1000;
-                console.warn(`生成超时 (${spent}s)。`);
-                alert(`生成失败！\n在 ${spent} 秒内未能找到 ${targetSteps} 步的完美解。\n请重试或减少步数。`);
+                const spent = ((Date.now() - startTime) / 1000).toFixed(1);
+                console.warn(`生成超时。`);
+                
+                let msg = `生成失败！\n在 ${spent} 秒内未找到 ${targetSteps} 步的解。`;
+                if (forceBottom) msg += `\n(已开启"强制底部起点"，这会显著增加生成难度)`;
+                
+                alert(msg);
                 this.draw();
             }
 
